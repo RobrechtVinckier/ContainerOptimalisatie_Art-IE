@@ -5,10 +5,12 @@ import {
   COLOR_PALETTE,
   YARD_CONFIG,
   cloneStacks,
+  summarizeStacks,
+} from "./yardModel.js";
+import {
   requestRandomConfiguration,
   requestSolvePlan,
-  summarizeStacks,
-} from "./fakeBackend.js";
+} from "./backendClient.js";
 
 const SCALE = 0.72;
 const CONTAINER_DIM = Object.freeze({

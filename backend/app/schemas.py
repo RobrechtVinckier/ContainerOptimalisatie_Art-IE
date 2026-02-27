@@ -150,6 +150,7 @@ class DayTruckJob(BaseModel):
     departTime: float
     craneWeightedCost: float
     laneWaitSeconds: float
+    craneTaskSeconds: float
 
 
 class DayCycleStats(BaseModel):

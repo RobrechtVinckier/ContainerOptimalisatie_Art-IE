@@ -15,13 +15,19 @@ YARD_HEIGHT = 4
 TRUCK_LANE_WIDTH = 2
 DEFAULT_CONTAINER_COUNT = 130
 LENGTH_COST_WEIGHT = 10
-DAY_TRUCK_SLOTS = 9
+DAY_TRUCK_SLOTS = 10
 TRUCK_PICKUP_X = YARD_WIDTH
 TRUCK_FLOW_HEADWAY_SECONDS = 6.0
 TRUCK_LOAD_BUFFER_SECONDS = 20.0
 DAY_START_SECONDS = 6 * 3600
 DAY_END_SECONDS = 22 * 3600
 DAY_DURATION_SECONDS = DAY_END_SECONDS - DAY_START_SECONDS
+
+# Crane timing model (meters and m/s)
+LENGTH_SPEED_MPS = 1.0
+WIDTH_SPEED_MPS = 2.0
+VERTICAL_EMPTY_SPEED_MPS = 1.2
+VERTICAL_LOADED_SPEED_MPS = 0.7
 
 CONTAINER_METERS = {
     "length": 12.19,
@@ -219,6 +225,9 @@ def _convert_moves_to_frontend(
 ) -> Tuple[List[dict], List[List[List[dict]]]]:
     working = clone_stacks(stacks)
     output: List[dict] = []
+    crane_x = 2.0
+    crane_z = 0.0
+    timeline_s = 0.0
 
     for move in moves:
         src_x = move.src[1]
@@ -234,11 +243,24 @@ def _convert_moves_to_frontend(
         container = source.pop()
         from_y = len(source)
         to_y = len(destination)
+        duration_seconds = _crane_move_seconds(
+            crane_x=crane_x,
+            crane_z=crane_z,
+            src_x=src_x,
+            src_z=src_z,
+            src_level=from_y,
+            dst_x=dst_x,
+            dst_z=dst_z,
+            dst_level=to_y,
+        )
+        t_start = timeline_s
+        t_end = t_start + duration_seconds
+        timeline_s = t_end
+        crane_x = float(dst_x)
+        crane_z = float(dst_z)
         destination.append(container)
 
         weighted_cost = abs(src_x - dst_x) + LENGTH_COST_WEIGHT * abs(src_z - dst_z)
-        t_start = float(getattr(move, "t_start", 0.0))
-        t_end = float(getattr(move, "t_end", t_start))
         output.append(
             {
                 "id": container["id"],
@@ -248,7 +270,7 @@ def _convert_moves_to_frontend(
                 "weightedCost": weighted_cost,
                 "tStart": t_start,
                 "tEnd": t_end,
-                "durationSeconds": max(0.0, t_end - t_start),
+                "durationSeconds": duration_seconds,
             }
         )
 
@@ -275,6 +297,53 @@ def _top_containers(stacks: List[List[List[dict]]]) -> List[Tuple[int, int, int,
 
 def _weighted_xy_cost(src_x: int | float, src_z: int | float, dst_x: int | float, dst_z: int | float) -> float:
     return float(abs(src_x - dst_x) + LENGTH_COST_WEIGHT * abs(src_z - dst_z))
+
+
+def _horizontal_travel_seconds(src_x: int | float, src_z: int | float, dst_x: int | float, dst_z: int | float) -> float:
+    dx_m = abs(src_x - dst_x) * CONTAINER_METERS["width"]
+    dz_m = abs(src_z - dst_z) * CONTAINER_METERS["length"]
+    return dx_m / WIDTH_SPEED_MPS + dz_m / LENGTH_SPEED_MPS
+
+
+def _stack_level_height_m(level: int) -> float:
+    # Level 0 top sits at one container height above ground.
+    return (level + 1) * CONTAINER_METERS["height"]
+
+
+def _travel_hook_height_m() -> float:
+    return (YARD_HEIGHT + 1) * CONTAINER_METERS["height"]
+
+
+def _crane_move_seconds(
+    *,
+    crane_x: int | float,
+    crane_z: int | float,
+    src_x: int,
+    src_z: int,
+    src_level: int,
+    dst_x: int | float,
+    dst_z: int | float,
+    dst_level: int,
+) -> float:
+    travel_height = _travel_hook_height_m()
+    pick_height = _stack_level_height_m(src_level)
+    place_height = _stack_level_height_m(dst_level)
+
+    horizontal_to_source = _horizontal_travel_seconds(crane_x, crane_z, src_x, src_z)
+    lower_empty = max(0.0, travel_height - pick_height) / VERTICAL_EMPTY_SPEED_MPS
+    lift_loaded = max(0.0, travel_height - pick_height) / VERTICAL_LOADED_SPEED_MPS
+    horizontal_with_load = _horizontal_travel_seconds(src_x, src_z, dst_x, dst_z)
+    lower_loaded = max(0.0, travel_height - place_height) / VERTICAL_LOADED_SPEED_MPS
+    raise_empty = max(0.0, travel_height - place_height) / VERTICAL_EMPTY_SPEED_MPS
+
+    return (
+        horizontal_to_source
+        + lower_empty
+        + lift_loaded
+        + horizontal_with_load
+        + lower_loaded
+        + raise_empty
+    )
 
 
 def _estimate_truck_timing(
@@ -325,10 +394,24 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
         for source_x, source_z, source_y, container in candidates:
             for slot_index in range(DAY_TRUCK_SLOTS):
                 slot_z = slot_z_map[slot_index]
-                to_source_cost = _weighted_xy_cost(crane_x, crane_z, source_x, source_z)
-                source_to_truck_cost = _weighted_xy_cost(source_x, source_z, TRUCK_PICKUP_X, slot_z)
-                tentative_load_start = max(crane_time + to_source_cost, slot_free_at[slot_index])
-                tentative_load_end = tentative_load_start + source_to_truck_cost
+                horizontal_weighted_cost = _weighted_xy_cost(crane_x, crane_z, source_x, source_z) + _weighted_xy_cost(
+                    source_x,
+                    source_z,
+                    TRUCK_PICKUP_X,
+                    slot_z,
+                )
+                crane_task_seconds = _crane_move_seconds(
+                    crane_x=crane_x,
+                    crane_z=crane_z,
+                    src_x=source_x,
+                    src_z=source_z,
+                    src_level=source_y,
+                    dst_x=TRUCK_PICKUP_X,
+                    dst_z=slot_z,
+                    dst_level=0,
+                )
+                tentative_load_start = max(crane_time, slot_free_at[slot_index])
+                tentative_load_end = tentative_load_start + crane_task_seconds
                 arrival_time, depart_time, lane_wait_seconds = _estimate_truck_timing(
                     load_start=tentative_load_start,
                     load_end=tentative_load_end,
@@ -349,8 +432,8 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
                         container,
                         slot_index,
                         slot_z,
-                        to_source_cost,
-                        source_to_truck_cost,
+                        horizontal_weighted_cost,
+                        crane_task_seconds,
                         tentative_load_start,
                         tentative_load_end,
                         arrival_time,
@@ -368,8 +451,8 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
             container,
             slot_index,
             slot_z,
-            to_source_cost,
-            source_to_truck_cost,
+            horizontal_weighted_cost,
+            crane_task_seconds,
             load_start,
             load_end,
             arrival_time,
@@ -409,15 +492,16 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
             "loadStartTime": load_start,
             "loadEndTime": load_end,
             "departTime": depart_time,
-            "craneWeightedCost": to_source_cost + source_to_truck_cost,
+            "craneWeightedCost": horizontal_weighted_cost,
             "laneWaitSeconds": lane_wait,
+            "craneTaskSeconds": crane_task_seconds,
         }
         jobs.append(job)
 
         crane_time = load_end
         crane_x = float(TRUCK_PICKUP_X)
         crane_z = float(slot_z)
-        total_crane_weighted_cost += to_source_cost + source_to_truck_cost
+        total_crane_weighted_cost += horizontal_weighted_cost
         total_lane_wait_seconds += lane_wait
 
     makespan_seconds = max((job["departTime"] for job in jobs), default=0.0)
@@ -446,6 +530,126 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
     }
 
 
+def _night_stage_for_day(
+    stacks: List[List[List[dict]]],
+    night_budget_s: float,
+    day_seed: int,
+) -> Tuple[List[dict], List[List[List[dict]]], float]:
+    _ = day_seed
+    working = clone_stacks(stacks)
+    moves: List[dict] = []
+    crane_x = 2.0
+    crane_z = 0.0
+    time_used = 0.0
+
+    def find_open_z(dst_x: int, center_z: int) -> int | None:
+        for radius in range(YARD_LENGTH):
+            candidates = [center_z] if radius == 0 else [center_z - radius, center_z + radius]
+            for z in candidates:
+                if 0 <= z < YARD_LENGTH and len(working[dst_x][z]) < YARD_HEIGHT:
+                    return z
+        return None
+
+    max_iters = 40
+    for _ in range(max_iters):
+        sources: List[Tuple[int, int, int, dict]] = []
+        for src_x in range(YARD_WIDTH):
+            for src_z in range(YARD_LENGTH):
+                stack = working[src_x][src_z]
+                if not stack:
+                    continue
+                # Stage containers toward truck-side width only.
+                if src_x >= YARD_WIDTH - 1:
+                    continue
+                sources.append((src_x, src_z, len(stack) - 1, stack[-1]))
+
+        if not sources:
+            break
+
+        best_candidate = None
+        best_score = None
+
+        for src_x, src_z, src_y, container in sources:
+            for dst_x in (YARD_WIDTH - 1, YARD_WIDTH - 2):
+                if dst_x <= src_x:
+                    continue
+                dst_z = find_open_z(dst_x, src_z)
+                if dst_z is None:
+                    continue
+
+                dst_y = len(working[dst_x][dst_z])
+                duration_seconds = _crane_move_seconds(
+                    crane_x=crane_x,
+                    crane_z=crane_z,
+                    src_x=src_x,
+                    src_z=src_z,
+                    src_level=src_y,
+                    dst_x=dst_x,
+                    dst_z=dst_z,
+                    dst_level=dst_y,
+                )
+                if time_used + duration_seconds > night_budget_s:
+                    continue
+
+                width_gain = float(dst_x - src_x) * CONTAINER_METERS["width"]
+                length_penalty = abs(dst_z - src_z) * CONTAINER_METERS["length"] * 0.05
+                stack_penalty = dst_y * 0.12
+                move_score = (width_gain - length_penalty - stack_penalty) / max(duration_seconds, 0.01)
+
+                if best_score is None or move_score > best_score:
+                    best_score = move_score
+                    best_candidate = (
+                        container,
+                        src_x,
+                        src_z,
+                        src_y,
+                        dst_x,
+                        dst_z,
+                        dst_y,
+                        duration_seconds,
+                    )
+
+        if best_candidate is None:
+            break
+
+        (
+            container,
+            src_x,
+            src_z,
+            src_y,
+            dst_x,
+            dst_z,
+            dst_y,
+            duration_seconds,
+        ) = best_candidate
+
+        src_stack = working[src_x][src_z]
+        dst_stack = working[dst_x][dst_z]
+        moved = src_stack.pop()
+        dst_stack.append(moved)
+
+        t_start = time_used
+        t_end = t_start + duration_seconds
+        time_used = t_end
+        crane_x = float(dst_x)
+        crane_z = float(dst_z)
+
+        moves.append(
+            {
+                "id": container["id"],
+                "color": container["color"],
+                "from": {"x": src_x, "z": src_z, "y": src_y},
+                "to": {"x": dst_x, "z": dst_z, "y": dst_y},
+                "weightedCost": _weighted_xy_cost(src_x, src_z, dst_x, dst_z),
+                "tStart": t_start,
+                "tEnd": t_end,
+                "durationSeconds": duration_seconds,
+            }
+        )
+
+    return moves, working, time_used
+
+
 def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.AlgorithmSettingsPatch | None = None) -> dict:
     if len(stacks) != YARD_WIDTH or any(len(column) != YARD_LENGTH for column in stacks):
         raise ValueError("Invalid stack dimensions")
@@ -468,6 +672,14 @@ def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.Algorit
 
     full_moves = list(greedy_moves) + list(tabu_moves)
     frontend_moves, final_stacks = _convert_moves_to_frontend(full_moves, initial)
+    fallback_night_time = 0.0
+    if not frontend_moves:
+        frontend_moves, final_stacks, fallback_night_time = _night_stage_for_day(
+            initial,
+            night_budget_s=float(settings.nightBudget),
+            day_seed=settings.seed,
+        )
+
     total_weighted_cost = sum(move["weightedCost"] for move in frontend_moves)
     initial_summary = summarize_stacks(initial)
     final_summary = summarize_stacks(final_stacks)
@@ -476,7 +688,7 @@ def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.Algorit
         "greedyMoveCount": len(greedy_moves),
         "tabuMoveCount": len(tabu_moves),
         "totalMoves": len(frontend_moves),
-        "timeUsedSeconds": float(tabu_state.time_used),
+        "timeUsedSeconds": float(tabu_state.time_used if (greedy_moves or tabu_moves) else fallback_night_time),
         "budgetSeconds": float(settings.nightBudget),
         "startPlacementScore": initial_summary["placementScore"],
         "endPlacementScore": final_summary["placementScore"],

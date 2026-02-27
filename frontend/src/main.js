@@ -39,7 +39,7 @@ const YARD_WIDTH_WORLD = YARD_CONFIG.width * STEP.x;
 const LANE_WIDTH_WORLD = YARD_CONFIG.truckLaneWidth * STEP.x;
 const TOTAL_WIDTH_WORLD = YARD_WIDTH_WORLD + LANE_WIDTH_WORLD;
 const YARD_LENGTH_WORLD = YARD_CONFIG.length * STEP.z;
-const DAY_SLOT_COUNT = 9;
+const DAY_SLOT_COUNT = 10;
 const NIGHT_CLOCK_BASE_SECONDS = 22 * 3600;
 const NIGHT_DURATION_SECONDS = 8 * 3600;
 const DAY_CLOCK_BASE_SECONDS = 6 * 3600;
@@ -1485,6 +1485,14 @@ function cancelRun() {
 }
 
 function tween(durationMs, onFrame, token) {
+  if (state.speed >= 80) {
+    if (token !== state.runToken) {
+      return Promise.resolve(false);
+    }
+    onFrame(1);
+    return Promise.resolve(true);
+  }
+
   return new Promise((resolve) => {
     let lastTime = null;
     let progress = 0;
@@ -1753,14 +1761,43 @@ async function executeDayJob(job, token) {
   }
   const topContainer = sourceStack[sourceStack.length - 1];
   const sourceContainer = topContainer;
+  const sourceX = stackXToWorld(job.source.x);
+  const sourceZ = stackZToWorld(job.source.z);
+  const truckDropX = world.trucks.parkingLaneX - LANE_WIDTH_WORLD * 0.13;
 
-  await moveCraneHorizontal(stackXToWorld(job.source.x), stackZToWorld(job.source.z), token);
+  const loadStart = Number.isFinite(job.loadStartTime) ? job.loadStartTime : state.phaseClockSeconds;
+  const loadEnd = Number.isFinite(job.loadEndTime)
+    ? job.loadEndTime
+    : loadStart + Math.max(1, Number(job.craneTaskSeconds) || 1);
+  const loadDuration = Math.max(0.05, loadEnd - loadStart);
+  const weightToSource = Math.abs(sourceX - state.cranePose.x) / STEP.x
+    + YARD_CONFIG.lengthCostWeight * (Math.abs(sourceZ - state.cranePose.z) / STEP.z);
+  const weightToTruckDrop = Math.abs(truckDropX - sourceX) / STEP.x
+    + YARD_CONFIG.lengthCostWeight * (Math.abs(slotZ - sourceZ) / STEP.z);
+  const hookDownWeight = 0.34;
+  const hookUpWeight = 0.24;
+  const totalWeight = Math.max(
+    0.0001,
+    weightToSource + hookDownWeight + hookUpWeight + weightToTruckDrop + hookDownWeight + hookUpWeight,
+  );
+  let clockCursor = loadStart;
+  const takeClockRange = (weight, forceEnd = false) => {
+    const start = clockCursor;
+    if (forceEnd) {
+      clockCursor = loadEnd;
+    } else {
+      clockCursor += loadDuration * (weight / totalWeight);
+    }
+    return { start, end: clockCursor };
+  };
+
+  await moveCraneHorizontal(sourceX, sourceZ, token, takeClockRange(weightToSource));
   if (token !== state.runToken) {
     return;
   }
 
   const pickY = stackToWorld(job.source.x, job.source.z, sourceStack.length - 1).y + CONTAINER_VISUAL_HEIGHT * 0.5 + 0.58;
-  await moveHook(pickY, token);
+  await moveHook(pickY, token, takeClockRange(hookDownWeight));
   if (token !== state.runToken) {
     return;
   }
@@ -1770,19 +1807,18 @@ async function executeDayJob(job, token) {
   updateProjections();
   updateStats();
 
-  await moveHook(world.crane.travelHookY, token);
+  await moveHook(world.crane.travelHookY, token, takeClockRange(hookUpWeight));
   if (token !== state.runToken) {
     return;
   }
 
-  const truckDropX = world.trucks.parkingLaneX - LANE_WIDTH_WORLD * 0.13;
-  await moveCraneHorizontal(truckDropX, slotZ, token);
+  await moveCraneHorizontal(truckDropX, slotZ, token, takeClockRange(weightToTruckDrop));
   if (token !== state.runToken) {
     return;
   }
 
   const truckHookY = CONTAINER_VISUAL_HEIGHT + 1.9;
-  await moveHook(truckHookY, token);
+  await moveHook(truckHookY, token, takeClockRange(hookDownWeight));
   if (token !== state.runToken) {
     return;
   }
@@ -1793,12 +1829,11 @@ async function executeDayJob(job, token) {
   updateProjections();
   updateStats();
 
-  await moveHook(world.crane.travelHookY, token);
+  await moveHook(world.crane.travelHookY, token, takeClockRange(hookUpWeight, true));
   if (token !== state.runToken) {
     return;
   }
-
-  await advancePhaseClockTo(job.loadEndTime, token, 50);
+  await advancePhaseClockTo(loadEnd, token, 45);
   if (token !== state.runToken) {
     return;
   }

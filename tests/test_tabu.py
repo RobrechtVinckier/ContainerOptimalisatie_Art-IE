@@ -197,6 +197,88 @@ class TestTabuBehavior(unittest.TestCase):
         self.assertGreater(x_move.delta_energy, y_move.delta_energy)
         self.assertGreater(x_move.score, y_move.score)
 
+    def test_group_retrieval_term_biases_towards_drop_for_active_group(self) -> None:
+        X, Y, H = 1, 3, 1
+        yard: List[List[List[int]]] = [[[] for _ in range(Y)] for _ in range(X)]
+        yard[0][1] = [0]
+        st = State.build_from_yard(X=X, Y=Y, H=H, yard=yard, group=[0])
+        st.crane_pos = (0, 1)
+        st.time_used = 0.0
+
+        cfg_base = OptimizerConfig(
+            seed=1,
+            lam=0.0,
+            energy_weight=0.0,
+            top_groups=1,
+            src_limit=1,
+            dst_limit_per_src=10,
+            x_radius=0,
+            y_aware=False,
+            group_retrieval_weight=0.0,
+            selection_mode="best",
+        )
+        cands_base = generate_candidate_moves(st, cfg_base)
+        self.assertGreaterEqual(len(cands_base), 2)
+        self.assertEqual(cands_base[0].dst, (0, 0))
+
+        cfg_group = OptimizerConfig(
+            **{
+                **cfg_base.__dict__,
+                "drop_x": 0,
+                "drop_y": 2,
+                "retrieval_time_weight": 1.0,
+                "retrieval_energy_weight": 0.0,
+                "group_blocker_penalty": 0.0,
+                "group_retrieval_weight": 10.0,
+                "active_group": 0,
+            }
+        )
+        cands_group = generate_candidate_moves(st, cfg_group)
+        self.assertGreaterEqual(len(cands_group), 2)
+        self.assertEqual(cands_group[0].dst, (0, 2))
+        self.assertLess(cands_group[0].delta_group_retrieval, 0.0)
+
+    def test_container_priority_term_biases_prioritized_container_towards_drop(self) -> None:
+        X, Y, H = 1, 3, 1
+        yard: List[List[List[int]]] = [[[] for _ in range(Y)] for _ in range(X)]
+        yard[0][1] = [0]
+        st = State.build_from_yard(X=X, Y=Y, H=H, yard=yard, group=[0])
+        st.crane_pos = (0, 1)
+        st.time_used = 0.0
+
+        cfg_base = OptimizerConfig(
+            seed=3,
+            lam=0.0,
+            energy_weight=0.0,
+            top_groups=1,
+            src_limit=1,
+            dst_limit_per_src=10,
+            x_radius=0,
+            y_aware=False,
+            container_retrieval_weight=0.0,
+            selection_mode="best",
+        )
+        cands_base = generate_candidate_moves(st, cfg_base)
+        self.assertGreaterEqual(len(cands_base), 2)
+        self.assertEqual(cands_base[0].dst, (0, 0))
+
+        cfg_priority = OptimizerConfig(
+            **{
+                **cfg_base.__dict__,
+                "drop_x": 0,
+                "drop_y": 2,
+                "retrieval_time_weight": 1.0,
+                "retrieval_energy_weight": 0.0,
+                "container_blocker_penalty": 0.0,
+                "container_retrieval_weight": 10.0,
+                "container_priority_map": {0: 1.0},
+            }
+        )
+        cands_priority = generate_candidate_moves(st, cfg_priority)
+        self.assertGreaterEqual(len(cands_priority), 2)
+        self.assertEqual(cands_priority[0].dst, (0, 2))
+        self.assertLess(cands_priority[0].delta_container_priority, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

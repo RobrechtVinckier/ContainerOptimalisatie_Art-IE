@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import random
-from typing import List
+from typing import Dict, List, Tuple
 
 from optimizer import OptimizerConfig, TabuMetrics, greedy_plan, tabu_improve
 from state import State
@@ -53,6 +53,32 @@ def print_group_metrics(state: State, max_groups: int = 12) -> None:
         )
 
 
+def parse_group_sequence(raw: str) -> Tuple[int, ...]:
+    text = raw.strip()
+    if not text:
+        return ()
+    return tuple(int(part.strip()) for part in text.split(",") if part.strip())
+
+
+def parse_container_priorities(raw: str) -> Dict[int, float]:
+    text = raw.strip()
+    if not text:
+        return {}
+
+    priorities: Dict[int, float] = {}
+    for chunk in text.split(","):
+        token = chunk.strip()
+        if not token:
+            continue
+        if ":" not in token:
+            raise ValueError(f"Invalid priority token '{token}', expected 'cid:weight'.")
+        cid_raw, weight_raw = token.split(":", 1)
+        cid = int(cid_raw.strip())
+        weight = float(weight_raw.strip())
+        priorities[cid] = weight
+    return priorities
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Night simulator + optimizer for 3D yard rehandling.")
     p.add_argument("--seed", type=int, default=1)
@@ -67,6 +93,23 @@ def main() -> None:
     p.add_argument("--energy-x-cost", type=float, default=10.0)
     p.add_argument("--energy-y-cost", type=float, default=1.0)
     p.add_argument("--energy-z-cost", type=float, default=1.0)
+    p.add_argument("--drop-x", type=int, default=0)
+    p.add_argument("--drop-y", type=int, default=0)
+    p.add_argument("--retrieval-time-weight", type=float, default=1.0)
+    p.add_argument("--retrieval-energy-weight", type=float, default=1.0)
+    p.add_argument("--group-retrieval-weight", type=float, default=0.0)
+    p.add_argument("--container-retrieval-weight", type=float, default=0.0)
+    p.add_argument("--group-blocker-penalty", type=float, default=5.0)
+    p.add_argument("--container-blocker-penalty", type=float, default=5.0)
+    p.add_argument("--active-group", type=int, default=None)
+    p.add_argument("--group-sequence", type=str, default="")
+    p.add_argument("--group-phase-index", type=int, default=0)
+    p.add_argument(
+        "--container-priorities",
+        type=str,
+        default="",
+        help="Comma-separated cid:weight list, e.g. '3:2.0,18:1.5'",
+    )
     p.add_argument("--night-budget", type=float, default=28800.0)
 
     p.add_argument("--top-groups", type=int, default=5)
@@ -91,6 +134,11 @@ def main() -> None:
     p.add_argument("--metrics-sample-every", type=int, default=50)
 
     args = p.parse_args()
+    try:
+        group_sequence = parse_group_sequence(args.group_sequence)
+        container_priority_map = parse_container_priorities(args.container_priorities)
+    except ValueError as exc:
+        p.error(str(exc))
 
     state0 = make_random_instance(args.X, args.Y, args.H, args.groups, args.per_group, args.seed)
     cfg = OptimizerConfig(
@@ -101,6 +149,18 @@ def main() -> None:
         energy_x_cost=args.energy_x_cost,
         energy_y_cost=args.energy_y_cost,
         energy_z_cost=args.energy_z_cost,
+        drop_x=args.drop_x,
+        drop_y=args.drop_y,
+        retrieval_time_weight=args.retrieval_time_weight,
+        retrieval_energy_weight=args.retrieval_energy_weight,
+        group_retrieval_weight=args.group_retrieval_weight,
+        container_retrieval_weight=args.container_retrieval_weight,
+        group_blocker_penalty=args.group_blocker_penalty,
+        container_blocker_penalty=args.container_blocker_penalty,
+        active_group=args.active_group,
+        group_sequence=group_sequence,
+        group_phase_index=args.group_phase_index,
+        container_priority_map=container_priority_map,
         top_groups=args.top_groups,
         src_limit=args.src_limit,
         dst_limit_per_src=args.dst_limit,

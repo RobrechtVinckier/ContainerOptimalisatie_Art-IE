@@ -18,6 +18,8 @@ class Candidate:
     delta_cluster: float
     delta_time: float
     delta_energy: float
+    delta_group_retrieval: float
+    delta_container_priority: float
     score: float
 
 
@@ -32,6 +34,20 @@ class OptimizerConfig:
     energy_x_cost: float = 10.0
     energy_y_cost: float = 1.0
     energy_z_cost: float = 1.0
+
+    # outbound/retrieval objective controls
+    drop_x: int = 0
+    drop_y: int = 0
+    retrieval_time_weight: float = 1.0
+    retrieval_energy_weight: float = 1.0
+    group_retrieval_weight: float = 0.0
+    container_retrieval_weight: float = 0.0
+    group_blocker_penalty: float = 5.0
+    container_blocker_penalty: float = 5.0
+    active_group: Optional[int] = None
+    group_sequence: Tuple[int, ...] = ()
+    group_phase_index: int = 0
+    container_priority_map: Dict[int, float] = field(default_factory=dict)
 
     # candidate generation controls
     top_groups: int = 5                 # consider groups with largest spread
@@ -110,6 +126,137 @@ def _move_energy_cost(state: State, src: XY, dst: XY, cfg: OptimizerConfig) -> f
     return cfg.energy_x_cost * ex + cfg.energy_y_cost * ey + cfg.energy_z_cost * ez
 
 
+def _drop_xy(cfg: OptimizerConfig) -> XY:
+    return (cfg.drop_x, cfg.drop_y)
+
+
+def _resolve_active_group(state: State, cfg: OptimizerConfig) -> Optional[int]:
+    G = state.num_groups()
+    if G <= 0:
+        return None
+
+    if cfg.active_group is not None and 0 <= cfg.active_group < G:
+        return cfg.active_group
+
+    if cfg.group_sequence:
+        idx = max(0, min(cfg.group_phase_index, len(cfg.group_sequence) - 1))
+        candidate = cfg.group_sequence[idx]
+        if 0 <= candidate < G:
+            return candidate
+    return None
+
+
+def _retrieval_time_to_drop(xy: XY, cfg: OptimizerConfig) -> float:
+    return travel_time(xy, _drop_xy(cfg))
+
+
+def _retrieval_energy_to_drop(xy: XY, z: int, cfg: OptimizerConfig) -> float:
+    drop = _drop_xy(cfg)
+    ex = abs(xy[0] - drop[0])
+    ey = abs(xy[1] - drop[1])
+    return cfg.energy_x_cost * ex + cfg.energy_y_cost * ey + cfg.energy_z_cost * z
+
+
+def _stack_group_retrieval_cost(state: State, stack: Sequence[int], xy: XY, active_group: int, cfg: OptimizerConfig) -> float:
+    if not stack:
+        return 0.0
+
+    base_time = _retrieval_time_to_drop(xy, cfg)
+    cost = 0.0
+    suffix_non_group = 0
+    for z in range(len(stack) - 1, -1, -1):
+        cid = stack[z]
+        is_active_group = state.group[cid] == active_group
+        if is_active_group:
+            base_energy = _retrieval_energy_to_drop(xy, z, cfg)
+            cost += (
+                cfg.retrieval_time_weight * base_time
+                + cfg.retrieval_energy_weight * base_energy
+                + cfg.group_blocker_penalty * suffix_non_group
+            )
+        else:
+            suffix_non_group += 1
+    return cost
+
+
+def _stack_container_priority_cost(
+    state: State,
+    stack: Sequence[int],
+    xy: XY,
+    priority_map: Dict[int, float],
+    cfg: OptimizerConfig,
+) -> float:
+    if not stack or not priority_map:
+        return 0.0
+
+    base_time = _retrieval_time_to_drop(xy, cfg)
+    top = len(stack) - 1
+    cost = 0.0
+    for z, cid in enumerate(stack):
+        w = priority_map.get(cid, 0.0)
+        if w <= 0.0:
+            continue
+        base_energy = _retrieval_energy_to_drop(xy, z, cfg)
+        blockers_all = top - z
+        cost += w * (
+            cfg.retrieval_time_weight * base_time
+            + cfg.retrieval_energy_weight * base_energy
+            + cfg.container_blocker_penalty * blockers_all
+        )
+    return cost
+
+
+def _delta_group_retrieval_cost_for_move(
+    state: State,
+    moved_cid: int,
+    src: XY,
+    dst: XY,
+    active_group: int,
+    cfg: OptimizerConfig,
+) -> float:
+    src_stack = state.stack(src)
+    dst_stack = state.stack(dst)
+    if not src_stack:
+        return 0.0
+
+    src_new = src_stack[:-1]
+    dst_new = list(dst_stack) + [moved_cid]
+
+    old_cost = _stack_group_retrieval_cost(state, src_stack, src, active_group, cfg)
+    old_cost += _stack_group_retrieval_cost(state, dst_stack, dst, active_group, cfg)
+
+    new_cost = _stack_group_retrieval_cost(state, src_new, src, active_group, cfg)
+    new_cost += _stack_group_retrieval_cost(state, dst_new, dst, active_group, cfg)
+    return new_cost - old_cost
+
+
+def _delta_container_priority_cost_for_move(
+    state: State,
+    moved_cid: int,
+    src: XY,
+    dst: XY,
+    priority_map: Dict[int, float],
+    cfg: OptimizerConfig,
+) -> float:
+    if not priority_map:
+        return 0.0
+
+    src_stack = state.stack(src)
+    dst_stack = state.stack(dst)
+    if not src_stack:
+        return 0.0
+
+    src_new = src_stack[:-1]
+    dst_new = list(dst_stack) + [moved_cid]
+
+    old_cost = _stack_container_priority_cost(state, src_stack, src, priority_map, cfg)
+    old_cost += _stack_container_priority_cost(state, dst_stack, dst, priority_map, cfg)
+
+    new_cost = _stack_container_priority_cost(state, src_new, src, priority_map, cfg)
+    new_cost += _stack_container_priority_cost(state, dst_new, dst, priority_map, cfg)
+    return new_cost - old_cost
+
+
 def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Optional[int] = None) -> List[Candidate]:
     """
     Candidate restriction:
@@ -147,6 +294,10 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                 free.append((x, y))
 
     candidates: List[Candidate] = []
+    active_group = _resolve_active_group(state, cfg)
+    use_group_retrieval = cfg.group_retrieval_weight != 0.0 and active_group is not None
+    use_container_priority = cfg.container_retrieval_weight != 0.0 and bool(cfg.container_priority_map)
+
     for src in srcs:
         cid = state.top(src)
         if cid is None:
@@ -198,12 +349,35 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             dt = state.move_time(src, dst)
             dcl = state.delta_cluster_cost_for_move(cid, src, dst)
             de = _move_energy_cost(state, src, dst, cfg)
-            score = dt + cfg.lam * dcl + cfg.energy_weight * de
-            candidates.append(Candidate(cid, src, dst, dcl, dt, de, score))
+            dgr = 0.0
+            dcp = 0.0
+            if use_group_retrieval and active_group is not None:
+                dgr = _delta_group_retrieval_cost_for_move(state, cid, src, dst, active_group, cfg)
+            if use_container_priority:
+                dcp = _delta_container_priority_cost_for_move(state, cid, src, dst, cfg.container_priority_map, cfg)
+
+            score = (
+                dt
+                + cfg.lam * dcl
+                + cfg.energy_weight * de
+                + cfg.group_retrieval_weight * dgr
+                + cfg.container_retrieval_weight * dcp
+            )
+            candidates.append(Candidate(cid, src, dst, dcl, dt, de, dgr, dcp, score))
 
     # deterministic ordering for stable selection
     candidates.sort(
-        key=lambda c: (c.score, c.delta_cluster, c.delta_time, c.delta_energy, c.container_id, c.src, c.dst)
+        key=lambda c: (
+            c.score,
+            c.delta_cluster,
+            c.delta_time,
+            c.delta_energy,
+            c.delta_group_retrieval,
+            c.delta_container_priority,
+            c.container_id,
+            c.src,
+            c.dst,
+        )
     )
     return candidates
 

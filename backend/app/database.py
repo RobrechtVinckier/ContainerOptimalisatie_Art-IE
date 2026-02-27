@@ -11,12 +11,16 @@ MAX_HEIGHT = 4
 MOCK_CONTAINERS = []
 MOCK_KRANEN = []
 MOCK_WAGENS = []
+MOCK_SHIPS = []
+MOCK_HISTORY = []
 
 def seed_data():
-    global MOCK_CONTAINERS, MOCK_KRANEN, MOCK_WAGENS
+    global MOCK_CONTAINERS, MOCK_KRANEN, MOCK_WAGENS, MOCK_SHIPS, MOCK_HISTORY
     MOCK_CONTAINERS = []
     MOCK_KRANEN = []
     MOCK_WAGENS = []
+    MOCK_SHIPS = []
+    MOCK_HISTORY = []
 
     # 1. Seed Containers (Realistic Simulation State)
     # We'll fill about 70% of the grid positions with varying stack heights
@@ -112,6 +116,15 @@ def seed_data():
         MOCK_CONTAINERS.append(wagen_container)
         MOCK_WAGENS[1]["current_container_id"] = wagen_container["id"]
 
+    # 5. Seed Ships (Vessel Schedule)
+    for ship_name in ships:
+        MOCK_SHIPS.append({
+            "name": ship_name,
+            "departure_time": datetime.now() + timedelta(days=random.randint(1, 10), hours=random.randint(0, 23))
+        })
+    # Sort by departure time for the schedule
+    MOCK_SHIPS.sort(key=lambda x: x["departure_time"])
+
 # Initial seed
 seed_data()
 
@@ -126,6 +139,12 @@ def get_all_kranen():
 def get_all_wagens():
     return MOCK_WAGENS
 
+def get_all_ships():
+    return MOCK_SHIPS
+
+def get_history():
+    return MOCK_HISTORY
+
 def get_container_by_id(container_id: int):
     return next((c for c in MOCK_CONTAINERS if c["id"] == container_id), None)
 
@@ -134,3 +153,30 @@ def get_kraan_by_id(kraan_id: int):
 
 def get_wagen_by_id(wagen_id: int):
     return next((w for w in MOCK_WAGENS if w["id"] == wagen_id), None)
+
+def move_container(container_id: int, new_pos: dict, kraan_id: int):
+    container = get_container_by_id(container_id)
+    kraan = get_kraan_by_id(kraan_id)
+    
+    if not container or not kraan:
+        return None
+        
+    old_pos = container["position"].copy()
+    
+    # Perform move
+    container["position"] = new_pos
+    kraan["location"] = new_pos  # Crane moves with the container
+    
+    # Log history
+    history_entry = {
+        "id": len(MOCK_HISTORY) + 1,
+        "timestamp": datetime.now(),
+        "container_id": container_id,
+        "unit_nr": container["unit_nr"],
+        "from_pos": old_pos,
+        "to_pos": new_pos,
+        "kraan_id": kraan_id
+    }
+    MOCK_HISTORY.append(history_entry)
+    
+    return history_entry

@@ -70,3 +70,21 @@ class Kraan(KraanBase):
 
     class Config:
         from_attributes = True
+
+class Ship(BaseModel):
+    name: str
+    departure_time: datetime
+
+class MoveCommand(BaseModel):
+    container_id: int
+    new_position: Position
+    kraan_id: Optional[int] = 1 # Default to the single crane we have
+
+class MoveHistory(BaseModel):
+    id: int
+    timestamp: datetime
+    container_id: int
+    unit_nr: str
+    from_pos: Position
+    to_pos: Position
+    kraan_id: int

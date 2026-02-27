@@ -68,6 +68,30 @@ async def reseed_simulation():
     database.seed_data()
     return {"message": "Simulation data reset successfully"}
 
+# --- Algorithm Integration Endpoints ---
+
+@app.get("/ships", response_model=List[schemas.Ship], tags=["Algorithm"])
+async def read_ships():
+    """Get the vessel schedule (Ship names and departure times)."""
+    return database.get_all_ships()
+
+@app.post("/move", response_model=schemas.MoveHistory, tags=["Algorithm"])
+async def move_container(command: schemas.MoveCommand):
+    """Move a container to a new position. Returns the history entry of the move."""
+    history_entry = database.move_container(
+        command.container_id, 
+        command.new_position.dict(), 
+        command.kraan_id
+    )
+    if not history_entry:
+        raise HTTPException(status_code=400, detail="Move failed. Check container and crane IDs.")
+    return history_entry
+
+@app.get("/history", response_model=List[schemas.MoveHistory], tags=["Algorithm"])
+async def read_history():
+    """Get the full history of moves performed during the simulation."""
+    return database.get_history()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

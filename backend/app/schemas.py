@@ -126,6 +126,7 @@ class YardConfigResponse(BaseModel):
 class NightCycleStats(BaseModel):
     greedyMoveCount: int
     tabuMoveCount: int
+    dayPrepMoveCount: int = 0
     totalMoves: int
     timeUsedSeconds: float
     budgetSeconds: float

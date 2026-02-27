@@ -29,6 +29,14 @@ WIDTH_SPEED_MPS = 2.0
 VERTICAL_EMPTY_SPEED_MPS = 1.2
 VERTICAL_LOADED_SPEED_MPS = 0.7
 DAY_ENERGY_WEIGHT = 6.0
+DAY_COMPANY_SWITCH_PENALTY = 140.0
+DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY = 720.0
+
+NIGHT_COMPANY_TARGET_Z = {
+    "red": 1,
+    "green": 5,
+    "blue": 8,
+}
 
 CONTAINER_METERS = {
     "length": 12.19,
@@ -223,6 +231,7 @@ def _optimizer_config(settings: schemas.AlgorithmSettings) -> OptimizerConfig:
 def _convert_moves_to_frontend(
     moves,
     stacks: List[List[List[dict]]],
+    night_budget_s: float | None = None,
 ) -> Tuple[List[dict], List[List[List[dict]]]]:
     working = clone_stacks(stacks)
     output: List[dict] = []
@@ -241,8 +250,7 @@ def _convert_moves_to_frontend(
         if not source or len(destination) >= YARD_HEIGHT:
             continue
 
-        container = source.pop()
-        from_y = len(source)
+        from_y = len(source) - 1
         to_y = len(destination)
         duration_seconds = _crane_move_seconds(
             crane_x=crane_x,
@@ -256,6 +264,10 @@ def _convert_moves_to_frontend(
         )
         t_start = timeline_s
         t_end = t_start + duration_seconds
+        if night_budget_s is not None and t_end > night_budget_s:
+            break
+
+        container = source.pop()
         timeline_s = t_end
         crane_x = float(dst_x)
         crane_z = float(dst_z)
@@ -368,6 +380,11 @@ def _estimate_truck_timing(
 def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
     rng = random.Random(day_seed ^ 0xBADC0DE)
     working = clone_stacks(stacks)
+    remaining_by_color = {"red": 0, "green": 0, "blue": 0}
+    for x in range(YARD_WIDTH):
+        for z in range(YARD_LENGTH):
+            for container in working[x][z]:
+                remaining_by_color[container["color"]] += 1
     slot_z_map = [_slot_to_stack_z(slot) for slot in range(DAY_TRUCK_SLOTS)]
     slot_free_at = [0.0] * DAY_TRUCK_SLOTS
     lane_flow_free_at = 0.0
@@ -421,14 +438,20 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
                 )
                 if depart_time > DAY_DURATION_SECONDS:
                     continue
-                # bias lightly to keep same company batches together for realistic dispatching
                 same_company_bonus = -0.35 if jobs and jobs[-1]["containerColor"] == container["color"] else 0.0
+                company_switch_penalty = 0.0
+                if jobs and jobs[-1]["containerColor"] != container["color"]:
+                    previous_color = jobs[-1]["containerColor"]
+                    company_switch_penalty += DAY_COMPANY_SWITCH_PENALTY
+                    if remaining_by_color.get(previous_color, 0) > 0:
+                        company_switch_penalty += DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY
                 # Optimize for crane efficiency first: expensive lengthwise crane movement
                 # is encoded in horizontal_weighted_cost (length axis weighted 10x).
                 score = (
                     depart_time
                     + lane_wait_seconds * 2.0
                     + horizontal_weighted_cost * DAY_ENERGY_WEIGHT
+                    + company_switch_penalty
                     + same_company_bonus
                     + rng.random() * 0.001
                 )
@@ -481,6 +504,7 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
         company = COMPANY_BY_COLOR[container["color"]]["company"]
         company_color = COMPANY_BY_COLOR[container["color"]]["truckColor"]
         company_trips[company] += 1
+        remaining_by_color[container["color"]] -= 1
 
         lane_flow_free_at = arrival_time + TRUCK_FLOW_HEADWAY_SECONDS
         lane_flow_free_at = depart_time + TRUCK_FLOW_HEADWAY_SECONDS
@@ -543,13 +567,16 @@ def _night_stage_for_day(
     stacks: List[List[List[dict]]],
     night_budget_s: float,
     day_seed: int,
+    *,
+    start_time_s: float = 0.0,
+    crane_start: Tuple[float, float] = (2.0, 0.0),
 ) -> Tuple[List[dict], List[List[List[dict]]], float]:
-    _ = day_seed
+    rng = random.Random(day_seed ^ 0x13579BDF)
     working = clone_stacks(stacks)
     moves: List[dict] = []
-    crane_x = 2.0
-    crane_z = 0.0
-    time_used = 0.0
+    crane_x = float(crane_start[0])
+    crane_z = float(crane_start[1])
+    time_used = float(start_time_s)
 
     def find_open_z(dst_x: int, center_z: int) -> int | None:
         for radius in range(YARD_LENGTH):
@@ -579,10 +606,11 @@ def _night_stage_for_day(
         best_score = None
 
         for src_x, src_z, src_y, container in sources:
+            target_z = NIGHT_COMPANY_TARGET_Z.get(container["color"], src_z)
             for dst_x in (YARD_WIDTH - 1, YARD_WIDTH - 2):
                 if dst_x <= src_x:
                     continue
-                dst_z = find_open_z(dst_x, src_z)
+                dst_z = find_open_z(dst_x, target_z)
                 if dst_z is None:
                     continue
 
@@ -601,9 +629,17 @@ def _night_stage_for_day(
                     continue
 
                 width_gain = float(dst_x - src_x) * CONTAINER_METERS["width"]
+                target_alignment_gain = max(0, abs(src_z - target_z) - abs(dst_z - target_z)) * CONTAINER_METERS["length"]
                 length_penalty = abs(dst_z - src_z) * CONTAINER_METERS["length"] * 0.05
                 stack_penalty = dst_y * 0.12
-                move_score = (width_gain - length_penalty - stack_penalty) / max(duration_seconds, 0.01)
+                jitter = rng.random() * 0.0005
+                move_score = (
+                    width_gain * 1.6
+                    + target_alignment_gain * 0.5
+                    - length_penalty
+                    - stack_penalty
+                    + jitter
+                ) / max(duration_seconds, 0.01)
 
                 if best_score is None or move_score > best_score:
                     best_score = move_score
@@ -680,14 +716,25 @@ def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.Algorit
     tabu_moves, _best_state = tabu_improve(tabu_state, cfg)
 
     full_moves = list(greedy_moves) + list(tabu_moves)
-    frontend_moves, final_stacks = _convert_moves_to_frontend(full_moves, initial)
-    fallback_night_time = 0.0
-    if not frontend_moves:
-        frontend_moves, final_stacks, fallback_night_time = _night_stage_for_day(
-            initial,
-            night_budget_s=float(settings.nightBudget),
-            day_seed=settings.seed,
-        )
+    frontend_moves, final_stacks = _convert_moves_to_frontend(
+        full_moves,
+        initial,
+        night_budget_s=float(settings.nightBudget),
+    )
+    algorithm_night_time = float(frontend_moves[-1]["tEnd"]) if frontend_moves else 0.0
+    crane_start = (float(frontend_moves[-1]["to"]["x"]), float(frontend_moves[-1]["to"]["z"])) if frontend_moves else (2.0, 0.0)
+
+    day_prep_moves, staged_stacks, staged_end_time = _night_stage_for_day(
+        final_stacks,
+        night_budget_s=float(settings.nightBudget),
+        day_seed=settings.seed,
+        start_time_s=algorithm_night_time,
+        crane_start=crane_start,
+    )
+    if day_prep_moves:
+        frontend_moves.extend(day_prep_moves)
+        final_stacks = staged_stacks
+    total_night_time = max(algorithm_night_time, staged_end_time)
 
     total_weighted_cost = sum(move["weightedCost"] for move in frontend_moves)
     initial_summary = summarize_stacks(initial)
@@ -696,8 +743,9 @@ def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.Algorit
     night_stats = {
         "greedyMoveCount": len(greedy_moves),
         "tabuMoveCount": len(tabu_moves),
+        "dayPrepMoveCount": len(day_prep_moves),
         "totalMoves": len(frontend_moves),
-        "timeUsedSeconds": float(tabu_state.time_used if (greedy_moves or tabu_moves) else fallback_night_time),
+        "timeUsedSeconds": total_night_time,
         "budgetSeconds": float(settings.nightBudget),
         "startPlacementScore": initial_summary["placementScore"],
         "endPlacementScore": final_summary["placementScore"],

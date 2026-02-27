@@ -28,6 +28,7 @@ LENGTH_SPEED_MPS = 1.0
 WIDTH_SPEED_MPS = 2.0
 VERTICAL_EMPTY_SPEED_MPS = 1.2
 VERTICAL_LOADED_SPEED_MPS = 0.7
+DAY_ENERGY_WEIGHT = 6.0
 
 CONTAINER_METERS = {
     "length": 12.19,
@@ -422,7 +423,15 @@ def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict
                     continue
                 # bias lightly to keep same company batches together for realistic dispatching
                 same_company_bonus = -0.35 if jobs and jobs[-1]["containerColor"] == container["color"] else 0.0
-                score = depart_time + lane_wait_seconds * 2.0 + same_company_bonus + rng.random() * 0.001
+                # Optimize for crane efficiency first: expensive lengthwise crane movement
+                # is encoded in horizontal_weighted_cost (length axis weighted 10x).
+                score = (
+                    depart_time
+                    + lane_wait_seconds * 2.0
+                    + horizontal_weighted_cost * DAY_ENERGY_WEIGHT
+                    + same_company_bonus
+                    + rng.random() * 0.001
+                )
                 if best_score is None or score < best_score:
                     best_score = score
                     best_choice = (

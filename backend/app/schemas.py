@@ -25,6 +25,9 @@ class SimulationMove(BaseModel):
     from_: StackPosition = Field(alias="from")
     to: StackPosition
     weightedCost: float
+    tStart: float = 0.0
+    tEnd: float = 0.0
+    durationSeconds: float = 0.0
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -106,6 +109,8 @@ class SolveSimulationResponse(BaseModel):
     totalWeightedCost: float
     finalSummary: SimulationSummary
     finalStacks: List[List[List[StackContainer]]]
+    nightStats: "NightCycleStats"
+    dayCycle: "DayCyclePlan"
 
 
 class YardConfigResponse(BaseModel):
@@ -116,3 +121,54 @@ class YardConfigResponse(BaseModel):
     containerCount: int
     lengthCostWeight: int
     containerMeters: Dict[str, float]
+
+
+class NightCycleStats(BaseModel):
+    greedyMoveCount: int
+    tabuMoveCount: int
+    totalMoves: int
+    timeUsedSeconds: float
+    budgetSeconds: float
+    startPlacementScore: float
+    endPlacementScore: float
+    lengthCostWeight: int
+
+
+class DayTruckJob(BaseModel):
+    jobIndex: int
+    truckId: str
+    company: str
+    companyColor: str
+    containerId: str
+    containerColor: ContainerColor
+    source: StackPosition
+    slotIndex: int
+    slotZ: int
+    arrivalTime: float
+    loadStartTime: float
+    loadEndTime: float
+    departTime: float
+    craneWeightedCost: float
+    laneWaitSeconds: float
+
+
+class DayCycleStats(BaseModel):
+    totalJobs: int
+    trucksUsed: int
+    companyTrips: Dict[str, int]
+    totalCraneWeightedCost: float
+    totalLaneWaitSeconds: float
+    makespanSeconds: float
+    score: float
+    lengthCostWeight: int
+    dayStartSeconds: int
+    dayEndSeconds: int
+    dayDurationSeconds: int
+    remainingContainers: int
+    completedWithinWindow: bool
+
+
+class DayCyclePlan(BaseModel):
+    slots: int
+    jobs: List[DayTruckJob]
+    stats: DayCycleStats

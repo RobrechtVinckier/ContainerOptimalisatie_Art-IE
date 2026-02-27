@@ -2,7 +2,7 @@ export const YARD_CONFIG = Object.freeze({
   width: 5,
   length: 10,
   height: 4,
-  truckLaneWidth: 1,
+  truckLaneWidth: 2,
   containerMeters: Object.freeze({
     length: 12.19,
     width: 2.44,

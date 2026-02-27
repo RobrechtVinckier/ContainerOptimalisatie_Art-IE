@@ -73,7 +73,7 @@ body {
   border-radius: 12px;
   background: linear-gradient(160deg, #ffffff, #eff5fb);
   display: grid;
-  grid-template-columns: repeat(4, max-content) minmax(220px, 340px) max-content 1fr;
+  grid-template-columns: repeat(8, max-content) 1fr;
   gap: 10px;
   align-items: center;
 }
@@ -145,6 +145,50 @@ body {
 
 .pass-box input {
   accent-color: #2384c9;
+}
+
+.cycle-box,
+.clock-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #9ebdd9;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: linear-gradient(160deg, #ffffff, #eaf2f9);
+  color: #2f5374;
+  font-size: 0.83rem;
+  white-space: nowrap;
+}
+
+.cycle-box .moon,
+.cycle-box .sun,
+.cycle-box .chain {
+  opacity: 0.45;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.cycle-box[data-phase="nightRunning"] .moon {
+  opacity: 1;
+}
+
+.cycle-box[data-phase="phaseShift"] .moon,
+.cycle-box[data-phase="phaseShift"] .chain,
+.cycle-box[data-phase="phaseShift"] .sun {
+  opacity: 1;
+}
+
+.cycle-box[data-phase="phaseShift"] .chain {
+  transform: scale(1.08);
+}
+
+.cycle-box[data-phase="dayRunning"] .sun,
+.cycle-box[data-phase="completed"] .sun {
+  opacity: 1;
+}
+
+.cycle-box strong {
+  margin-left: 4px;
 }
 
 .status-text {
@@ -223,6 +267,44 @@ body {
 .lane-note {
   margin-left: auto;
   color: #39658f;
+}
+
+.runtime-panel {
+  border: 1px solid #a8c2db;
+  border-radius: 10px;
+  padding: 8px;
+  background: linear-gradient(160deg, #f8fbff, #ebf3fa);
+}
+
+.runtime-panel h3 {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4e7398;
+}
+
+.runtime-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.runtime-grid div {
+  border: 1px solid #b3c9de;
+  border-radius: 8px;
+  padding: 6px;
+  background: #f4f9ff;
+}
+
+.runtime-grid label {
+  display: block;
+  font-size: 0.7rem;
+  color: #587a98;
+}
+
+.runtime-grid strong {
+  font-size: 0.92rem;
 }
 
 .side-panel {
@@ -395,6 +477,10 @@ body {
     margin-left: 0;
     width: 100%;
   }
+
+  .runtime-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -425,6 +511,10 @@ body {
   }
 
   .algo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-grid {
     grid-template-columns: 1fr;
   }
 }

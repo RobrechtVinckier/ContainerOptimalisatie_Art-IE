@@ -257,7 +257,6 @@ function initWorld(host) {
   const trucks = buildTrucks(environmentGroup);
 
   const crane = buildCrane(environmentGroup);
-  buildOrientationSignpost(environmentGroup);
 
   const containerVisuals = new Map();
 
@@ -382,13 +381,13 @@ function buildTrucks(group) {
 
   const truckA = createTruckModel("#f7c94b", "#4f5661");
   truckA.position.set(laneCenterX, 0.22, YARD_MIN_Z - 6);
+  truckA.rotation.y = Math.PI;
   truckA.userData.speed = 0.16;
   trucks.push(truckA);
   group.add(truckA);
 
   const truckB = createTruckModel("#88a2c4", "#2b3544");
   truckB.position.set(laneCenterX, 0.22, YARD_MIN_Z + YARD_LENGTH_WORLD + 12);
-  truckB.rotation.y = Math.PI;
   truckB.userData.speed = -0.11;
   trucks.push(truckB);
   group.add(truckB);
@@ -577,72 +576,6 @@ function buildCrane(group) {
     trolleyY,
     travelHookY: beamY - 2.65,
   };
-}
-
-function buildOrientationSignpost(group) {
-  const signGroup = new THREE.Group();
-  signGroup.position.set(LANE_MIN_X + LANE_WIDTH_WORLD + 3, 0, YARD_MIN_Z + 4.3);
-  group.add(signGroup);
-
-  const postMaterial = new THREE.MeshStandardMaterial({ color: "#61788f", roughness: 0.45, metalness: 0.35 });
-  const armMaterial = new THREE.MeshStandardMaterial({ color: "#7b92a7", roughness: 0.4, metalness: 0.28 });
-
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 4.6, 10), postMaterial);
-  pole.position.y = 2.3;
-  pole.castShadow = true;
-  signGroup.add(pole);
-
-  const directions = [
-    { label: "FRONT", axis: new THREE.Vector3(0, 0, 1), y: 3.4, color: "#3d74ad" },
-    { label: "BACK", axis: new THREE.Vector3(0, 0, -1), y: 2.8, color: "#2c5f94" },
-    { label: "LEFT", axis: new THREE.Vector3(-1, 0, 0), y: 2.2, color: "#2a7b9f" },
-    { label: "RIGHT", axis: new THREE.Vector3(1, 0, 0), y: 1.6, color: "#4f89bc" },
-  ];
-
-  for (const direction of directions) {
-    const armLength = 1.4;
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(armLength, 0.09, 0.09), armMaterial);
-    arm.position.set(direction.axis.x * armLength * 0.5, direction.y, direction.axis.z * armLength * 0.5);
-    arm.rotation.y = Math.atan2(direction.axis.x, direction.axis.z);
-    arm.castShadow = true;
-    signGroup.add(arm);
-
-    const label = createDirectionLabelSprite(direction.label, direction.color);
-    label.position.set(direction.axis.x * 1.15, direction.y + 0.24, direction.axis.z * 1.15);
-    signGroup.add(label);
-  }
-
-  const topLabel = createDirectionLabelSprite("TOP", "#5288bb");
-  topLabel.position.set(0, 4.72, 0);
-  signGroup.add(topLabel);
-
-  const bottomLabel = createDirectionLabelSprite("BOTTOM", "#5a7fa5");
-  bottomLabel.position.set(0, 0.52, 0);
-  signGroup.add(bottomLabel);
-}
-
-function createDirectionLabelSprite(text, bgColor) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 96;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-  ctx.fillStyle = "#f8fbff";
-  ctx.font = "700 40px 'Space Grotesk', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(2.2, 0.82, 1);
-  return sprite;
 }
 
 function createContainerMesh(color) {
@@ -848,9 +781,10 @@ function applyCranePose() {
 
 function animateTrucks(deltaSeconds) {
   const zSpan = YARD_LENGTH_WORLD + 26;
+  const speedFactor = Math.max(0.05, state.speed);
 
   for (const truck of world.trucks) {
-    truck.position.z += truck.userData.speed * zSpan * deltaSeconds;
+    truck.position.z += truck.userData.speed * speedFactor * zSpan * deltaSeconds;
 
     if (truck.position.z > YARD_MIN_Z + YARD_LENGTH_WORLD + 12) {
       truck.position.z = YARD_MIN_Z - 12;
@@ -1094,43 +1028,62 @@ function onProjectionCanvasClick(view, event) {
   refs.statusText.textContent = `Selected ${ids.length} container${ids.length === 1 ? "" : "s"} from ${view} view.`;
 }
 
+function getViewFitDistance(halfWidth, halfHeight, paddingFactor = 1.14) {
+  const fovY = THREE.MathUtils.degToRad(world.camera.fov);
+  const fovX = 2 * Math.atan(Math.tan(fovY / 2) * world.camera.aspect);
+  const distanceForHeight = halfHeight / Math.tan(fovY / 2);
+  const distanceForWidth = halfWidth / Math.tan(fovX / 2);
+  return Math.max(distanceForHeight, distanceForWidth) * paddingFactor;
+}
+
 function snapCameraToView(view) {
-  const center = new THREE.Vector3(CONTAINER_MIN_X + YARD_WIDTH_WORLD / 2, STEP.y * 1.7, 0);
-  const distance = Math.max(YARD_LENGTH_WORLD, YARD_WIDTH_WORLD) * 0.92 + 14;
-  const newPosition = new THREE.Vector3();
+  const heightSpan = YARD_CONFIG.height * STEP.y + 8.6;
+  const widthSpan = TOTAL_WIDTH_WORLD + 4.2;
+  const lengthSpan = YARD_LENGTH_WORLD + 8.6;
+  const center = new THREE.Vector3(CONTAINER_MIN_X + TOTAL_WIDTH_WORLD / 2, heightSpan * 0.42, 0);
+  const direction = new THREE.Vector3();
+  let distance = 24;
 
   switch (view) {
     case "front":
-      newPosition.set(center.x, center.y + 1.5, YARD_MIN_Z - distance);
+      distance = getViewFitDistance(widthSpan / 2, heightSpan / 2);
+      direction.set(0, 0, -1);
       world.camera.up.set(0, 1, 0);
       break;
     case "back":
-      newPosition.set(center.x, center.y + 1.5, YARD_MIN_Z + YARD_LENGTH_WORLD + distance);
+      distance = getViewFitDistance(widthSpan / 2, heightSpan / 2);
+      direction.set(0, 0, 1);
       world.camera.up.set(0, 1, 0);
       break;
     case "left":
-      newPosition.set(CONTAINER_MIN_X - distance, center.y + 1.2, center.z);
+      distance = getViewFitDistance(lengthSpan / 2, heightSpan / 2);
+      direction.set(-1, 0, 0);
       world.camera.up.set(0, 1, 0);
       break;
     case "right":
-      newPosition.set(CONTAINER_MIN_X + YARD_WIDTH_WORLD + distance, center.y + 1.2, center.z);
+      distance = getViewFitDistance(lengthSpan / 2, heightSpan / 2);
+      direction.set(1, 0, 0);
       world.camera.up.set(0, 1, 0);
       break;
     case "top":
-      newPosition.set(center.x, STEP.y * (YARD_CONFIG.height + 6), center.z + 0.01);
+      distance = getViewFitDistance(widthSpan / 2, lengthSpan / 2);
+      direction.set(0, 1, 0.0002);
       world.camera.up.set(0, 0, -1);
       break;
     case "bottom":
-      newPosition.set(center.x, -STEP.y * (YARD_CONFIG.height + 3.2), center.z + 0.01);
+      distance = getViewFitDistance(widthSpan / 2, lengthSpan / 2);
+      direction.set(0, -1, 0.0002);
       world.camera.up.set(0, 0, 1);
       break;
     default:
       return;
   }
 
+  const newPosition = center.clone().add(direction.normalize().multiplyScalar(distance));
   world.controls.target.copy(center);
   world.camera.position.copy(newPosition);
   world.camera.lookAt(center);
+  world.camera.updateProjectionMatrix();
   world.controls.update();
   refs.statusText.textContent = `Camera aligned to ${view} view.`;
 }

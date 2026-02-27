@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import random
-from typing import List, Tuple
+from typing import List
 
-from optimizer import OptimizerConfig, greedy_plan, tabu_improve
+from optimizer import OptimizerConfig, TabuMetrics, greedy_plan, tabu_improve
 from state import State
 
 
@@ -63,28 +63,61 @@ def main() -> None:
     p.add_argument("--per-group", type=int, default=15)
 
     p.add_argument("--lambda", dest="lam", type=float, default=1.0)
+    p.add_argument("--energy-weight", type=float, default=1.0)
+    p.add_argument("--energy-x-cost", type=float, default=10.0)
+    p.add_argument("--energy-y-cost", type=float, default=1.0)
+    p.add_argument("--energy-z-cost", type=float, default=1.0)
     p.add_argument("--night-budget", type=float, default=28800.0)
 
     p.add_argument("--top-groups", type=int, default=5)
     p.add_argument("--src-limit", type=int, default=40)
     p.add_argument("--dst-limit", type=int, default=30)
     p.add_argument("--x-radius", type=int, default=2)
+    p.add_argument("--y-radius", type=int, default=1)
+    p.add_argument("--y-aware", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--diversify-period", type=int, default=0)
+    p.add_argument("--diversify-random-dsts", type=int, default=0)
 
     p.add_argument("--tabu-iters", type=int, default=1500)
     p.add_argument("--tabu-len", type=int, default=200)
+    p.add_argument("--tabu-mode", choices=["cid_edge", "edge", "edge_reverse", "combined"], default="combined")
+    p.add_argument("--selection-mode", choices=["best", "topk_best_nontabu", "topk_deterministic"], default="topk_best_nontabu")
+    p.add_argument("--top-k", type=int, default=30)
+    p.add_argument("--non-improving-penalty", type=float, default=1.0)
+    p.add_argument("--plateau-iters", type=int, default=120)
+    p.add_argument("--shake-enabled", action=argparse.BooleanOptionalAction, default=True)
+
+    p.add_argument("--metrics", action="store_true", help="Print lightweight Tabu run metrics.")
+    p.add_argument("--metrics-sample-every", type=int, default=50)
 
     args = p.parse_args()
 
     state0 = make_random_instance(args.X, args.Y, args.H, args.groups, args.per_group, args.seed)
     cfg = OptimizerConfig(
+        seed=args.seed,
         night_budget_s=args.night_budget,
         lam=args.lam,
+        energy_weight=args.energy_weight,
+        energy_x_cost=args.energy_x_cost,
+        energy_y_cost=args.energy_y_cost,
+        energy_z_cost=args.energy_z_cost,
         top_groups=args.top_groups,
         src_limit=args.src_limit,
         dst_limit_per_src=args.dst_limit,
         x_radius=args.x_radius,
+        y_radius=args.y_radius,
+        y_aware=args.y_aware,
+        diversify_period=args.diversify_period,
+        diversify_random_dsts=args.diversify_random_dsts,
         tabu_iters=args.tabu_iters,
         tabu_len=args.tabu_len,
+        tabu_mode=args.tabu_mode,
+        top_k=args.top_k,
+        selection_mode=args.selection_mode,
+        non_improving_penalty=args.non_improving_penalty,
+        plateau_iters=args.plateau_iters,
+        shake_enabled=args.shake_enabled,
+        metrics_sample_every=args.metrics_sample_every,
     )
 
     start_cost = state0.cluster_cost()
@@ -102,7 +135,8 @@ def main() -> None:
 
     # Tabu improve from greedy state
     state_t = state_g.clone()
-    tabu_moves, best_state = tabu_improve(state_t, cfg)
+    metrics = TabuMetrics() if args.metrics else None
+    tabu_moves, best_state = tabu_improve(state_t, cfg, metrics=metrics)
     best_cost = best_state.cluster_cost()
 
     print("\nTabu result (best found during search)")
@@ -110,6 +144,22 @@ def main() -> None:
     print(f"  best_time_used: {best_state.time_used:.2f}s / {cfg.night_budget_s:.2f}s")
     print(f"  best_cluster_cost: {start_cost:.2f} -> {best_cost:.2f}  (delta {best_cost - start_cost:+.2f})")
     print_group_metrics(best_state)
+
+    if metrics is not None:
+        print("\nTabu metrics")
+        print(f"  total_search_moves: {metrics.total_search_moves}")
+        print(f"  unique_containers_moved: {metrics.unique_containers_moved}")
+        print(f"  immediate_reversals: {metrics.immediate_reversals}")
+        print(f"  repeated_edges: {metrics.repeated_edges}")
+        if metrics.best_cost_curve:
+            first_it, first_cost = metrics.best_cost_curve[0]
+            last_it, last_cost = metrics.best_cost_curve[-1]
+            print(
+                "  best_cost_curve:"
+                f" samples={len(metrics.best_cost_curve)}"
+                f" first=({first_it}, {first_cost:.2f})"
+                f" last=({last_it}, {last_cost:.2f})"
+            )
 
     # Output move list (compact)
     print("\nMove list (first 30):")

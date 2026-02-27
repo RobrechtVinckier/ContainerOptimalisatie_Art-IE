@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ContainerColor = Literal["red", "green", "blue"]
@@ -26,12 +26,11 @@ class SimulationMove(BaseModel):
     to: StackPosition
     weightedCost: float
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SimulationSummary(BaseModel):
-    colorCount: Dict[ContainerColor, int]
+    colorCount: Dict[str, int]
     total: int
     inTargetSlot: int
     placementScore: float

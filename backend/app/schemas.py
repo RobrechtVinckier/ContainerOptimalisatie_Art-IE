@@ -1,90 +1,119 @@
-from pydantic import BaseModel
-from typing import Optional, Dict, List
-from datetime import datetime
+from __future__ import annotations
 
-class Position(BaseModel):
-    x: float  # Column index (0-9)
-    y: float  # Row index (0-4)
-    z: float  # Stack height index (0-3)
+from typing import Dict, List, Literal, Optional
 
-class Dimensions(BaseModel):
-    length: float
-    width: float
-    depth: float
+from pydantic import BaseModel, Field
 
-class TerminalLayout(BaseModel):
-    columns: int = 10
-    rows: int = 5
-    stack_height: int = 4
 
-class ContainerBase(BaseModel):
-    unit_nr: str
-    position: Position
-    arrival_time: datetime
-    departure_time: datetime
-    ship: str
-    origin: str
-    urgency: Optional[str] = "Normal"
-    weight: Optional[float] = None
-    status: str = "In Stack"  # "In Stack", "On Crane", "On Wagen", "Departed"
+ContainerColor = Literal["red", "green", "blue"]
 
-class ContainerCreate(ContainerBase):
-    pass
 
-class Container(ContainerBase):
-    id: int
+class StackContainer(BaseModel):
+    id: str
+    color: ContainerColor
+
+
+class StackPosition(BaseModel):
+    x: int
+    z: int
+    y: int
+
+
+class SimulationMove(BaseModel):
+    id: str
+    color: ContainerColor
+    from_: StackPosition = Field(alias="from")
+    to: StackPosition
+    weightedCost: float
 
     class Config:
-        from_attributes = True
+        populate_by_name = True
 
-class WagenBase(BaseModel):
-    name: str
-    position_x: float  # Position along the 10 columns
-    status: str  # "Idle", "Loading", "Moving", "Full"
-    current_container_id: Optional[int] = None
 
-class WagenCreate(WagenBase):
-    pass
+class SimulationSummary(BaseModel):
+    colorCount: Dict[ContainerColor, int]
+    total: int
+    inTargetSlot: int
+    placementScore: float
 
-class Wagen(WagenBase):
-    id: int
 
-    class Config:
-        from_attributes = True
+class AlgorithmSettings(BaseModel):
+    seed: int = 1
+    lam: float = 1.0
+    nightBudget: float = 28800.0
+    energyWeight: float = 1.0
+    energyXCost: float = 10.0
+    energyYCost: float = 1.0
+    energyZCost: float = 1.0
+    topGroups: int = 5
+    srcLimit: int = 40
+    dstLimit: int = 30
+    xRadius: int = 2
+    yRadius: int = 1
+    yAware: bool = True
+    tabuIters: int = 1500
+    tabuLen: int = 200
+    tabuMode: Literal["cid_edge", "edge", "edge_reverse", "combined"] = "combined"
+    selectionMode: Literal["best", "topk_best_nontabu", "topk_deterministic"] = "topk_best_nontabu"
+    topK: int = 30
+    nonImprovingPenalty: float = 1.0
+    plateauIters: int = 120
+    shakeEnabled: bool = True
 
-class KraanBase(BaseModel):
-    name: str
-    location: Position
-    status: str  # "Idle", "Working", "Maintenance"
-    current_container_id: Optional[int] = None
-    current_wagen_id: Optional[int] = None
-    specifications: Dict[str, str]
-    terminal: str
-    dimensions: Dimensions
 
-class KraanCreate(KraanBase):
-    pass
+class AlgorithmSettingsPatch(BaseModel):
+    seed: Optional[int] = None
+    lam: Optional[float] = None
+    nightBudget: Optional[float] = None
+    energyWeight: Optional[float] = None
+    energyXCost: Optional[float] = None
+    energyYCost: Optional[float] = None
+    energyZCost: Optional[float] = None
+    topGroups: Optional[int] = None
+    srcLimit: Optional[int] = None
+    dstLimit: Optional[int] = None
+    xRadius: Optional[int] = None
+    yRadius: Optional[int] = None
+    yAware: Optional[bool] = None
+    tabuIters: Optional[int] = None
+    tabuLen: Optional[int] = None
+    tabuMode: Optional[Literal["cid_edge", "edge", "edge_reverse", "combined"]] = None
+    selectionMode: Optional[Literal["best", "topk_best_nontabu", "topk_deterministic"]] = None
+    topK: Optional[int] = None
+    nonImprovingPenalty: Optional[float] = None
+    plateauIters: Optional[int] = None
+    shakeEnabled: Optional[bool] = None
 
-class Kraan(KraanBase):
-    id: int
 
-    class Config:
-        from_attributes = True
+class RandomSimulationRequest(BaseModel):
+    seed: Optional[int] = None
+    containerCount: int = 130
 
-class Ship(BaseModel):
-    name: str
-    departure_time: datetime
 
-class MoveCommand(BaseModel):
-    container_id: int
-    new_position: Position
-    kraan_id: Optional[int] = 1 # Default to the single crane we have
+class RandomSimulationResponse(BaseModel):
+    seed: int
+    stacks: List[List[List[StackContainer]]]
+    summary: SimulationSummary
 
-class MoveHistory(BaseModel):
-    id: int
-    timestamp: datetime
-    container_id: int
-    unit_nr: str
-    from_pos: Position
-    to_pos: Position
-    kraan_id: int
+
+class SolveSimulationRequest(BaseModel):
+    stacks: List[List[List[StackContainer]]]
+    settings: Optional[AlgorithmSettingsPatch] = None
+
+
+class SolveSimulationResponse(BaseModel):
+    moves: List[SimulationMove]
+    solved: bool
+    totalWeightedCost: float
+    finalSummary: SimulationSummary
+    finalStacks: List[List[List[StackContainer]]]
+
+
+class YardConfigResponse(BaseModel):
+    width: int
+    length: int
+    height: int
+    truckLaneWidth: int
+    containerCount: int
+    lengthCostWeight: int
+    containerMeters: Dict[str, float]

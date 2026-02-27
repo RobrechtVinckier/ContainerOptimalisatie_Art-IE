@@ -8,8 +8,10 @@ import {
   summarizeStacks,
 } from "./yardModel.js";
 import {
+  getAlgorithmSettings,
   requestRandomConfiguration,
   requestSolvePlan,
+  updateAlgorithmSettings,
 } from "./backendClient.js";
 
 const SCALE = 0.72;
@@ -65,6 +67,7 @@ app.innerHTML = `
         <input id="passthrough-toggle" type="checkbox" />
         <span>Passthrough</span>
       </label>
+      <button id="algo-apply-btn" class="btn">Apply Algo Settings</button>
       <div class="status-text" id="status-text">Ready.</div>
     </section>
 
@@ -99,6 +102,18 @@ app.innerHTML = `
           </div>
         </div>
 
+        <section class="algo-settings">
+          <h3>Algorithm Settings</h3>
+          <div class="algo-grid">
+            <label><span>Lambda</span><input id="algo-lam" type="number" min="0" step="0.1" value="1" /></label>
+            <label><span>Tabu Iterations</span><input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
+            <label><span>Tabu Length</span><input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
+            <label><span>X Radius</span><input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
+            <label><span>Top Groups</span><input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
+            <label><span>Night Budget (s)</span><input id="algo-night-budget" type="number" min="1" step="100" value="28800" /></label>
+          </div>
+        </section>
+
         <div class="projection-grid" id="projection-grid">
           <article class="projection-card" data-view="top"><header><h3>Top</h3><button class="eye-btn" data-view="top" aria-label="Focus top view">Eye</button></header><canvas id="view-top" width="240" height="160"></canvas></article>
           <article class="projection-card" data-view="bottom"><header><h3>Bottom</h3><button class="eye-btn" data-view="bottom" aria-label="Focus bottom view">Eye</button></header><canvas id="view-bottom" width="240" height="160"></canvas></article>
@@ -120,6 +135,13 @@ const refs = {
   speedSlider: document.getElementById("speed-slider"),
   speedValue: document.getElementById("speed-value"),
   passthroughToggle: document.getElementById("passthrough-toggle"),
+  algoApplyBtn: document.getElementById("algo-apply-btn"),
+  algoLam: document.getElementById("algo-lam"),
+  algoTabuIters: document.getElementById("algo-tabu-iters"),
+  algoTabuLen: document.getElementById("algo-tabu-len"),
+  algoXRadius: document.getElementById("algo-x-radius"),
+  algoTopGroups: document.getElementById("algo-top-groups"),
+  algoNightBudget: document.getElementById("algo-night-budget"),
   statusText: document.getElementById("status-text"),
   statTotal: document.getElementById("stat-total"),
   statScore: document.getElementById("stat-score"),
@@ -150,6 +172,7 @@ const state = {
   selectedContainerIds: new Set(),
   projectionHitMaps: {},
   selectedProjectionCell: null,
+  algorithmSettings: null,
 };
 
 const colorToHex = {
@@ -193,6 +216,10 @@ refs.passthroughToggle.addEventListener("change", (event) => {
   applyContainerSelectionStyles();
 });
 
+refs.algoApplyBtn.addEventListener("click", () => {
+  applyAlgorithmSettings();
+});
+
 for (const eyeButton of refs.eyeButtons) {
   eyeButton.addEventListener("click", () => {
     snapCameraToView(eyeButton.dataset.view);
@@ -206,6 +233,7 @@ for (const [view, canvas] of Object.entries(refs.projections)) {
 }
 
 startRenderLoop();
+await loadAlgorithmSettings();
 await generateScenario();
 
 function initWorld(host) {
@@ -896,6 +924,50 @@ function updateStats() {
   refs.statCost.textContent = `${state.weightedCost}`;
 }
 
+function setAlgorithmFormValues(settings) {
+  refs.algoLam.value = String(settings.lam);
+  refs.algoTabuIters.value = String(settings.tabuIters);
+  refs.algoTabuLen.value = String(settings.tabuLen);
+  refs.algoXRadius.value = String(settings.xRadius);
+  refs.algoTopGroups.value = String(settings.topGroups);
+  refs.algoNightBudget.value = String(settings.nightBudget);
+}
+
+function getAlgorithmFormValues() {
+  return {
+    lam: Number(refs.algoLam.value),
+    tabuIters: Number(refs.algoTabuIters.value),
+    tabuLen: Number(refs.algoTabuLen.value),
+    xRadius: Number(refs.algoXRadius.value),
+    topGroups: Number(refs.algoTopGroups.value),
+    nightBudget: Number(refs.algoNightBudget.value),
+  };
+}
+
+async function loadAlgorithmSettings() {
+  try {
+    const settings = await getAlgorithmSettings();
+    state.algorithmSettings = settings;
+    setAlgorithmFormValues(settings);
+  } catch (error) {
+    refs.statusText.textContent = `Settings load failed: ${error.message}`;
+  }
+}
+
+async function applyAlgorithmSettings() {
+  refs.algoApplyBtn.disabled = true;
+  try {
+    const settings = await updateAlgorithmSettings(getAlgorithmFormValues());
+    state.algorithmSettings = settings;
+    setAlgorithmFormValues(settings);
+    refs.statusText.textContent = "Algorithm settings updated on backend.";
+  } catch (error) {
+    refs.statusText.textContent = `Settings update failed: ${error.message}`;
+  } finally {
+    refs.algoApplyBtn.disabled = false;
+  }
+}
+
 function drawProjection(view, canvas, cols, rows, cellResolver, options = {}) {
   const flipX = Boolean(options.flipX);
   const flipY = options.flipY === undefined ? true : Boolean(options.flipY);
@@ -1186,6 +1258,7 @@ function snapCameraToView(view) {
 function setBusyUi(busy) {
   refs.generateBtn.disabled = busy;
   refs.solveBtn.disabled = busy || !state.stacks;
+  refs.algoApplyBtn.disabled = busy;
 }
 
 async function generateScenario() {
@@ -1194,7 +1267,7 @@ async function generateScenario() {
   state.paused = false;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
-  refs.statusText.textContent = "Requesting random container layout from fake backend...";
+  refs.statusText.textContent = "Requesting random container layout from backend...";
   state.moveCursor = 0;
   state.moveTotal = 0;
   state.weightedCost = 0;
@@ -1205,7 +1278,15 @@ async function generateScenario() {
 
   setBusyUi(true);
 
-  const response = await requestRandomConfiguration();
+  let response;
+  try {
+    response = await requestRandomConfiguration();
+  } catch (error) {
+    refs.statusText.textContent = `Random request failed: ${error.message}`;
+    setBusyUi(false);
+    return;
+  }
+
   if (token !== state.runToken) {
     return;
   }
@@ -1382,10 +1463,22 @@ async function solveScenario() {
   refs.pauseBtn.textContent = "Pause";
   refs.generateBtn.disabled = true;
   refs.solveBtn.disabled = true;
-  refs.statusText.textContent = "Requesting solve plan from fake backend...";
+  refs.statusText.textContent = "Requesting solve plan from backend...";
   updateStats();
 
-  const plan = await requestSolvePlan(cloneStacks(state.stacks));
+  let plan;
+  try {
+    plan = await requestSolvePlan(cloneStacks(state.stacks), getAlgorithmFormValues());
+  } catch (error) {
+    state.solving = false;
+    refs.pauseBtn.disabled = true;
+    refs.pauseBtn.textContent = "Pause";
+    refs.generateBtn.disabled = false;
+    refs.solveBtn.disabled = false;
+    refs.statusText.textContent = `Solve request failed: ${error.message}`;
+    return;
+  }
+
   if (token !== state.runToken) {
     return;
   }

@@ -1,182 +1,257 @@
-from .schemas import Container, Kraan, Wagen, Position, Dimensions
-from datetime import datetime, timedelta
+from __future__ import annotations
+
 import random
+import time
+from typing import Dict, List, Tuple
 
-# Configuration
-COLUMNS = 10
-ROWS = 5
-MAX_HEIGHT = 4
+from algorithm.optimizer import OptimizerConfig, greedy_plan, tabu_improve
+from algorithm.state import State
 
-# Mock storage
-MOCK_CONTAINERS = []
-MOCK_KRANEN = []
-MOCK_WAGENS = []
-MOCK_SHIPS = []
-MOCK_HISTORY = []
+from . import schemas
 
-def seed_data():
-    global MOCK_CONTAINERS, MOCK_KRANEN, MOCK_WAGENS, MOCK_SHIPS, MOCK_HISTORY
-    MOCK_CONTAINERS = []
-    MOCK_KRANEN = []
-    MOCK_WAGENS = []
-    MOCK_SHIPS = []
-    MOCK_HISTORY = []
+YARD_WIDTH = 5
+YARD_LENGTH = 10
+YARD_HEIGHT = 4
+TRUCK_LANE_WIDTH = 1
+DEFAULT_CONTAINER_COUNT = 130
+LENGTH_COST_WEIGHT = 10
 
-    # 1. Seed Containers (Realistic Simulation State)
-    # We'll fill about 70% of the grid positions with varying stack heights
-    container_id = 1
-    
-    cities = ["Shanghai", "Singapore", "Rotterdam", "Antwerp", "Hamburg", "Ningbo", "Shenzhen", "Busan", "Dubai", "Los Angeles"]
-    ships = ["MSC Oscar", "CMA CGM Marco Polo", "Maersk Mc-Kinney Moller", "Ever Golden", "HMM Algeciras"]
-    urgencies = ["Low", "Normal", "High", "Critical"]
-    
-    for x in range(COLUMNS):
-        for y in range(ROWS):
-            # 70% chance to have a stack at this (x, y) coordinate
-            if random.random() < 0.7:
-                height = random.randint(1, MAX_HEIGHT)
-                for z in range(height):
-                    origin = random.choice(cities)
-                    ship = random.choice(ships)
-                    
-                    MOCK_CONTAINERS.append({
-                        "id": container_id,
-                        "unit_nr": f"U-CONT-{1000 + container_id}",
-                        "position": {"x": float(x), "y": float(y), "z": float(z)},
-                        "arrival_time": datetime.now() - timedelta(days=random.randint(1, 5)),
-                        "departure_time": datetime.now() + timedelta(days=random.randint(1, 10)),
-                        "ship": ship,
-                        "origin": origin,
-                        "urgency": random.choice(urgencies),
-                        "weight": round(random.uniform(5000, 30000), 2),  # Weight in kg
-                        "status": "In Stack"
-                    })
-                    container_id += 1
+CONTAINER_METERS = {
+    "length": 12.19,
+    "width": 2.44,
+    "height": 2.59,
+}
 
-    # 2. Seed Wagens (Vehicles) - Positioned along the row length (Columns)
-    MOCK_WAGENS = [
-        {
-            "id": 1,
-            "name": "Wagen-Alpha",
-            "position_x": 2.5,  # Stationary between column 2 and 3
-            "status": "Loading",
-            "current_container_id": None
-        },
-        {
-            "id": 2,
-            "name": "Wagen-Beta",
-            "position_x": 8.0,
-            "status": "Moving",
-            "current_container_id": None
-        },
-        {
-            "id": 3,
-            "name": "Wagen-Gamma",
-            "position_x": 0.0,
-            "status": "Idle",
-            "current_container_id": None
-        }
-    ]
+COLOR_ORDER = ("red", "green", "blue")
+COLOR_TO_GROUP = {"red": 0, "green": 1, "blue": 2}
+TARGET_PATTERNS = (
+    ("red", "green", "blue", "red", "green"),
+    ("green", "blue", "red", "green", "blue"),
+    ("blue", "red", "green", "blue", "red"),
+)
 
-    # 3. Seed Cranes (Kraan)
-    MOCK_KRANEN = [
-        {
-            "id": 1,
-            "name": "Main-Gantry-01",
-            "location": {"x": 2.5, "y": 2.0, "z": 8.0},
-            "status": "Working",
-            "current_container_id": None, # Will be set below
-            "current_wagen_id": 1,
-            "specifications": {"max_speed": "2m/s", "hoist_speed": "1m/s", "capacity": "45T"},
-            "terminal": "Terminal-West",
-            "dimensions": {"length": 12.2, "width": 2.4, "depth": 2.6}
-        }
-    ]
+ALGORITHM_SETTINGS = schemas.AlgorithmSettings()
 
-    # 4. Create an 'Active' simulation scenario:
-    # Let's say Crane 1 is currently moving Container ID 1 to Wagen 1
-    if MOCK_CONTAINERS:
-        active_container = MOCK_CONTAINERS[0]
-        active_container["status"] = "On Crane"
-        MOCK_KRANEN[0]["current_container_id"] = active_container["id"]
-        
-        # And Wagen 2 is already carrying a container (let's add one specifically for it)
-        wagen_container = {
-            "id": container_id,
-            "unit_nr": f"U-WAG-{2000}",
-            "position": {"x": 8.0, "y": -1.0, "z": 0.0}, # -1 row indicates it's on the track
-            "arrival_time": datetime.now(),
-            "departure_time": datetime.now() + timedelta(hours=2),
-            "ship": "Ever Given",
-            "origin": "Terminal-West",
-            "urgency": "High",
-            "weight": 18000.0,
-            "status": "On Wagen"
-        }
-        MOCK_CONTAINERS.append(wagen_container)
-        MOCK_WAGENS[1]["current_container_id"] = wagen_container["id"]
 
-    # 5. Seed Ships (Vessel Schedule)
-    for ship_name in ships:
-        MOCK_SHIPS.append({
-            "name": ship_name,
-            "departure_time": datetime.now() + timedelta(days=random.randint(1, 10), hours=random.randint(0, 23))
-        })
-    # Sort by departure time for the schedule
-    MOCK_SHIPS.sort(key=lambda x: x["departure_time"])
-
-# Initial seed
-seed_data()
-
-# --- Helper Functions ---
-
-def get_all_containers():
-    return MOCK_CONTAINERS
-
-def get_all_kranen():
-    return MOCK_KRANEN
-
-def get_all_wagens():
-    return MOCK_WAGENS
-
-def get_all_ships():
-    return MOCK_SHIPS
-
-def get_history():
-    return MOCK_HISTORY
-
-def get_container_by_id(container_id: int):
-    return next((c for c in MOCK_CONTAINERS if c["id"] == container_id), None)
-
-def get_kraan_by_id(kraan_id: int):
-    return next((k for k in MOCK_KRANEN if k["id"] == kraan_id), None)
-
-def get_wagen_by_id(wagen_id: int):
-    return next((w for w in MOCK_WAGENS if w["id"] == wagen_id), None)
-
-def move_container(container_id: int, new_pos: dict, kraan_id: int):
-    container = get_container_by_id(container_id)
-    kraan = get_kraan_by_id(kraan_id)
-    
-    if not container or not kraan:
-        return None
-        
-    old_pos = container["position"].copy()
-    
-    # Perform move
-    container["position"] = new_pos
-    kraan["location"] = new_pos  # Crane moves with the container
-    
-    # Log history
-    history_entry = {
-        "id": len(MOCK_HISTORY) + 1,
-        "timestamp": datetime.now(),
-        "container_id": container_id,
-        "unit_nr": container["unit_nr"],
-        "from_pos": old_pos,
-        "to_pos": new_pos,
-        "kraan_id": kraan_id
+def yard_config_payload() -> dict:
+    return {
+        "width": YARD_WIDTH,
+        "length": YARD_LENGTH,
+        "height": YARD_HEIGHT,
+        "truckLaneWidth": TRUCK_LANE_WIDTH,
+        "containerCount": DEFAULT_CONTAINER_COUNT,
+        "lengthCostWeight": LENGTH_COST_WEIGHT,
+        "containerMeters": CONTAINER_METERS,
     }
-    MOCK_HISTORY.append(history_entry)
-    
-    return history_entry
+
+
+def get_algorithm_settings() -> schemas.AlgorithmSettings:
+    return ALGORITHM_SETTINGS
+
+
+def update_algorithm_settings(patch: schemas.AlgorithmSettingsPatch) -> schemas.AlgorithmSettings:
+    global ALGORITHM_SETTINGS
+
+    current = ALGORITHM_SETTINGS.model_dump()
+    updates = patch.model_dump(exclude_none=True)
+    current.update(updates)
+    ALGORITHM_SETTINGS = schemas.AlgorithmSettings(**current)
+    return ALGORITHM_SETTINGS
+
+
+def create_empty_stacks() -> List[List[List[dict]]]:
+    return [[[] for _ in range(YARD_LENGTH)] for _ in range(YARD_WIDTH)]
+
+
+def clone_stacks(stacks: List[List[List[dict]]]) -> List[List[List[dict]]]:
+    return [[[{"id": c["id"], "color": c["color"]} for c in stack] for stack in columns] for columns in stacks]
+
+
+def target_color_for_slot(x: int, z: int) -> str:
+    return TARGET_PATTERNS[z % len(TARGET_PATTERNS)][x]
+
+
+def summarize_stacks(stacks: List[List[List[dict]]]) -> dict:
+    color_count = {"red": 0, "green": 0, "blue": 0}
+    in_target_slot = 0
+    total = 0
+
+    for x in range(YARD_WIDTH):
+        for z in range(YARD_LENGTH):
+            target = target_color_for_slot(x, z)
+            for container in stacks[x][z]:
+                color_count[container["color"]] += 1
+                if container["color"] == target:
+                    in_target_slot += 1
+                total += 1
+
+    score = 1.0 if total == 0 else in_target_slot / total
+    return {
+        "colorCount": color_count,
+        "total": total,
+        "inTargetSlot": in_target_slot,
+        "placementScore": score,
+    }
+
+
+def is_solved(stacks: List[List[List[dict]]]) -> bool:
+    for x in range(YARD_WIDTH):
+        for z in range(YARD_LENGTH):
+            target = target_color_for_slot(x, z)
+            for container in stacks[x][z]:
+                if container["color"] != target:
+                    return False
+    return True
+
+
+def random_configuration(seed: int | None = None, container_count: int = DEFAULT_CONTAINER_COUNT) -> dict:
+    resolved_seed = int(seed if seed is not None else time.time_ns() % 1_000_000_000)
+    rng = random.Random(resolved_seed)
+
+    max_capacity = YARD_WIDTH * YARD_LENGTH * YARD_HEIGHT
+    if container_count > max_capacity:
+        raise ValueError(f"containerCount={container_count} exceeds capacity={max_capacity}")
+
+    stacks = create_empty_stacks()
+    heights = [[0 for _ in range(YARD_LENGTH)] for _ in range(YARD_WIDTH)]
+
+    remaining = container_count
+    while remaining > 0:
+        x = rng.randrange(YARD_WIDTH)
+        z = rng.randrange(YARD_LENGTH)
+        if heights[x][z] >= YARD_HEIGHT:
+            continue
+        heights[x][z] += 1
+        remaining -= 1
+
+    next_id = 1
+    for x in range(YARD_WIDTH):
+        for z in range(YARD_LENGTH):
+            for _ in range(heights[x][z]):
+                color = COLOR_ORDER[rng.randrange(len(COLOR_ORDER))]
+                stacks[x][z].append({"id": f"C{next_id:04d}", "color": color})
+                next_id += 1
+
+    return {
+        "seed": resolved_seed,
+        "stacks": stacks,
+        "summary": summarize_stacks(stacks),
+    }
+
+
+def _state_from_stacks(stacks: List[List[List[dict]]]) -> Tuple[State, Dict[int, dict]]:
+    # Algorithm axis mapping:
+    # algorithm X -> yard length (z), algorithm Y -> yard width (x)
+    yard = [[[] for _ in range(YARD_WIDTH)] for _ in range(YARD_LENGTH)]
+    group: List[int] = []
+    metadata: Dict[int, dict] = {}
+
+    for x in range(YARD_WIDTH):
+        for z in range(YARD_LENGTH):
+            for container in stacks[x][z]:
+                cid = len(group)
+                group_id = COLOR_TO_GROUP[container["color"]]
+                group.append(group_id)
+                yard[z][x].append(cid)
+                metadata[cid] = {"id": container["id"], "color": container["color"]}
+
+    state = State.build_from_yard(X=YARD_LENGTH, Y=YARD_WIDTH, H=YARD_HEIGHT, yard=yard, group=group)
+    state.crane_pos = (0, 0)
+    state.time_used = 0.0
+    return state, metadata
+
+
+def _optimizer_config(settings: schemas.AlgorithmSettings) -> OptimizerConfig:
+    return OptimizerConfig(
+        seed=settings.seed,
+        lam=settings.lam,
+        night_budget_s=settings.nightBudget,
+        energy_weight=settings.energyWeight,
+        energy_x_cost=settings.energyXCost,
+        energy_y_cost=settings.energyYCost,
+        energy_z_cost=settings.energyZCost,
+        top_groups=settings.topGroups,
+        src_limit=settings.srcLimit,
+        dst_limit_per_src=settings.dstLimit,
+        x_radius=settings.xRadius,
+        y_radius=settings.yRadius,
+        y_aware=settings.yAware,
+        tabu_iters=settings.tabuIters,
+        tabu_len=settings.tabuLen,
+        tabu_mode=settings.tabuMode,
+        selection_mode=settings.selectionMode,
+        top_k=settings.topK,
+        non_improving_penalty=settings.nonImprovingPenalty,
+        plateau_iters=settings.plateauIters,
+        shake_enabled=settings.shakeEnabled,
+    )
+
+
+def _convert_moves_to_frontend(
+    moves,
+    stacks: List[List[List[dict]]],
+) -> Tuple[List[dict], List[List[List[dict]]]]:
+    working = clone_stacks(stacks)
+    output: List[dict] = []
+
+    for move in moves:
+        src_x = move.src[1]
+        src_z = move.src[0]
+        dst_x = move.dst[1]
+        dst_z = move.dst[0]
+
+        source = working[src_x][src_z]
+        destination = working[dst_x][dst_z]
+        if not source or len(destination) >= YARD_HEIGHT:
+            continue
+
+        container = source.pop()
+        from_y = len(source)
+        to_y = len(destination)
+        destination.append(container)
+
+        weighted_cost = abs(src_x - dst_x) + LENGTH_COST_WEIGHT * abs(src_z - dst_z)
+        output.append(
+            {
+                "id": container["id"],
+                "color": container["color"],
+                "from": {"x": src_x, "z": src_z, "y": from_y},
+                "to": {"x": dst_x, "z": dst_z, "y": to_y},
+                "weightedCost": weighted_cost,
+            }
+        )
+
+    return output, working
+
+
+def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.AlgorithmSettingsPatch | None = None) -> dict:
+    if len(stacks) != YARD_WIDTH or any(len(column) != YARD_LENGTH for column in stacks):
+        raise ValueError("Invalid stack dimensions")
+
+    settings = get_algorithm_settings()
+    if settings_patch is not None:
+        merged = settings.model_dump()
+        merged.update(settings_patch.model_dump(exclude_none=True))
+        settings = schemas.AlgorithmSettings(**merged)
+
+    initial = clone_stacks(stacks)
+    state, _metadata = _state_from_stacks(initial)
+    cfg = _optimizer_config(settings)
+
+    greedy_state = state.clone()
+    greedy_moves = greedy_plan(greedy_state, cfg)
+
+    tabu_state = greedy_state.clone()
+    tabu_moves, _best_state = tabu_improve(tabu_state, cfg)
+
+    full_moves = list(greedy_moves) + list(tabu_moves)
+    frontend_moves, final_stacks = _convert_moves_to_frontend(full_moves, initial)
+    total_weighted_cost = sum(move["weightedCost"] for move in frontend_moves)
+
+    return {
+        "moves": frontend_moves,
+        "solved": is_solved(final_stacks),
+        "totalWeightedCost": total_weighted_cost,
+        "finalSummary": summarize_stacks(final_stacks),
+        "finalStacks": final_stacks,
+    }

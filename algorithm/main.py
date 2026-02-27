@@ -4,8 +4,12 @@ import argparse
 import random
 from typing import List
 
-from optimizer import OptimizerConfig, TabuMetrics, greedy_plan, tabu_improve
-from state import State
+try:
+    from .optimizer import OptimizerConfig, TabuMetrics, greedy_plan, tabu_improve
+    from .state import State
+except ImportError:  # pragma: no cover - CLI fallback
+    from optimizer import OptimizerConfig, TabuMetrics, greedy_plan, tabu_improve
+    from state import State
 
 
 def make_random_instance(X: int, Y: int, H: int, groups: int, per_group: int, seed: int) -> State:

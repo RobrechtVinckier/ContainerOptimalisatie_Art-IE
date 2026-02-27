@@ -4,7 +4,10 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Literal
 
-from state import Move, State, XY, travel_time
+try:
+    from .state import Move, State, XY, travel_time
+except ImportError:  # pragma: no cover - CLI fallback
+    from state import Move, State, XY, travel_time
 
 TabuMode = Literal["cid_edge", "edge", "edge_reverse", "combined"]
 SelectionMode = Literal["best", "topk_best_nontabu", "topk_deterministic"]

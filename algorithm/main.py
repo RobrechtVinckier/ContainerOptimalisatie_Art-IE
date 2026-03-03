@@ -67,6 +67,13 @@ def main() -> None:
     p.add_argument("--per-group", type=int, default=15)
 
     p.add_argument("--lambda", dest="lam", type=float, default=1.0)
+    p.add_argument("--stack-top-mismatch-weight", type=float, default=0.0)
+    p.add_argument("--stack-rehandle-weight", type=float, default=0.0)
+    p.add_argument("--stack-impurity-weight", type=float, default=0.0)
+    p.add_argument("--buried-foreign-weight", type=float, default=0.0)
+    p.add_argument("--group-fragmentation-weight", type=float, default=0.0)
+    p.add_argument("--quality-tie-eps", type=float, default=1e-9)
+    p.add_argument("--operational-weight", type=float, default=1.0)
     p.add_argument("--energy-weight", type=float, default=1.0)
     p.add_argument("--energy-x-cost", type=float, default=10.0)
     p.add_argument("--energy-y-cost", type=float, default=1.0)
@@ -90,6 +97,21 @@ def main() -> None:
     p.add_argument("--non-improving-penalty", type=float, default=1.0)
     p.add_argument("--plateau-iters", type=int, default=120)
     p.add_argument("--shake-enabled", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--reactive-tabu-enabled", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--tabu-len-min", type=int, default=200)
+    p.add_argument("--tabu-len-max", type=int, default=200)
+    p.add_argument("--tabu-reactive-window", type=int, default=80)
+    p.add_argument("--tabu-reverse-rate-threshold", type=float, default=0.12)
+    p.add_argument("--tabu-repeat-rate-threshold", type=float, default=0.35)
+    p.add_argument("--tabu-stagnation-rate-threshold", type=float, default=0.04)
+    p.add_argument("--tabu-len-adjust-step", type=int, default=10)
+    p.add_argument("--frequency-edge-weight", type=float, default=0.0)
+    p.add_argument("--frequency-stack-weight", type=float, default=0.0)
+    p.add_argument("--frequency-container-weight", type=float, default=0.0)
+    p.add_argument("--elite-pool-size", type=int, default=4)
+    p.add_argument("--elite-restart-enabled", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--path-relink-enabled", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--path-relink-steps", type=int, default=6)
 
     p.add_argument("--metrics", action="store_true", help="Print lightweight Tabu run metrics.")
     p.add_argument("--metrics-sample-every", type=int, default=50)
@@ -101,6 +123,13 @@ def main() -> None:
         seed=args.seed,
         night_budget_s=args.night_budget,
         lam=args.lam,
+        stack_top_mismatch_weight=args.stack_top_mismatch_weight,
+        stack_rehandle_weight=args.stack_rehandle_weight,
+        stack_impurity_weight=args.stack_impurity_weight,
+        buried_foreign_weight=args.buried_foreign_weight,
+        group_fragmentation_weight=args.group_fragmentation_weight,
+        quality_tie_eps=args.quality_tie_eps,
+        operational_weight=args.operational_weight,
         energy_weight=args.energy_weight,
         energy_x_cost=args.energy_x_cost,
         energy_y_cost=args.energy_y_cost,
@@ -121,6 +150,21 @@ def main() -> None:
         non_improving_penalty=args.non_improving_penalty,
         plateau_iters=args.plateau_iters,
         shake_enabled=args.shake_enabled,
+        reactive_tabu_enabled=args.reactive_tabu_enabled,
+        tabu_len_min=args.tabu_len_min,
+        tabu_len_max=args.tabu_len_max,
+        tabu_reactive_window=args.tabu_reactive_window,
+        tabu_reverse_rate_threshold=args.tabu_reverse_rate_threshold,
+        tabu_repeat_rate_threshold=args.tabu_repeat_rate_threshold,
+        tabu_stagnation_rate_threshold=args.tabu_stagnation_rate_threshold,
+        tabu_len_adjust_step=args.tabu_len_adjust_step,
+        frequency_edge_weight=args.frequency_edge_weight,
+        frequency_stack_weight=args.frequency_stack_weight,
+        frequency_container_weight=args.frequency_container_weight,
+        elite_pool_size=args.elite_pool_size,
+        elite_restart_enabled=args.elite_restart_enabled,
+        path_relink_enabled=args.path_relink_enabled,
+        path_relink_steps=args.path_relink_steps,
         metrics_sample_every=args.metrics_sample_every,
     )
 
@@ -155,6 +199,9 @@ def main() -> None:
         print(f"  unique_containers_moved: {metrics.unique_containers_moved}")
         print(f"  immediate_reversals: {metrics.immediate_reversals}")
         print(f"  repeated_edges: {metrics.repeated_edges}")
+        print(f"  stop_reason: {metrics.stop_reason}")
+        print(f"  restarts: {metrics.restart_count}")
+        print(f"  relink_steps_applied: {metrics.relink_steps_applied}")
         if metrics.best_cost_curve:
             first_it, first_cost = metrics.best_cost_curve[0]
             last_it, last_cost = metrics.best_cost_curve[-1]
@@ -163,6 +210,15 @@ def main() -> None:
                 f" samples={len(metrics.best_cost_curve)}"
                 f" first=({first_it}, {first_cost:.2f})"
                 f" last=({last_it}, {last_cost:.2f})"
+            )
+        if metrics.tabu_len_curve:
+            first_it, first_len = metrics.tabu_len_curve[0]
+            last_it, last_len = metrics.tabu_len_curve[-1]
+            print(
+                "  tabu_len_curve:"
+                f" samples={len(metrics.tabu_len_curve)}"
+                f" first=({first_it}, {first_len})"
+                f" last=({last_it}, {last_len})"
             )
 
     # Output move list (compact)

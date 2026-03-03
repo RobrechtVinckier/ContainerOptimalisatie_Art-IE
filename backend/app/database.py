@@ -1,75 +1,44 @@
 from __future__ import annotations
 
-import random
-import time
-from typing import Dict, List, Tuple
-
-from algorithm.optimizer import OptimizerConfig, greedy_plan, tabu_improve
-from algorithm.state import State
+from typing import Dict, List, Mapping, Tuple
 
 from . import schemas
-
-YARD_WIDTH = 5
-YARD_LENGTH = 10
-YARD_HEIGHT = 4
-TRUCK_LANE_WIDTH = 2
-DEFAULT_CONTAINER_COUNT = 130
-LENGTH_COST_WEIGHT = 10
-DAY_TRUCK_SLOTS = 10
-TRUCK_PICKUP_X = YARD_WIDTH
-TRUCK_FLOW_HEADWAY_SECONDS = 6.0
-TRUCK_LOAD_BUFFER_SECONDS = 20.0
-DAY_START_SECONDS = 6 * 3600
-DAY_END_SECONDS = 22 * 3600
-DAY_DURATION_SECONDS = DAY_END_SECONDS - DAY_START_SECONDS
-
-# Crane timing model (meters and m/s)
-LENGTH_SPEED_MPS = 1.0
-WIDTH_SPEED_MPS = 2.0
-VERTICAL_EMPTY_SPEED_MPS = 1.2
-VERTICAL_LOADED_SPEED_MPS = 0.7
-DAY_ENERGY_WEIGHT = 6.0
-DAY_COMPANY_SWITCH_PENALTY = 140.0
-DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY = 720.0
-
-NIGHT_COMPANY_TARGET_Z = {
-    "red": 1,
-    "green": 5,
-    "blue": 8,
-}
-
-CONTAINER_METERS = {
-    "length": 12.19,
-    "width": 2.44,
-    "height": 2.59,
-}
-
-COLOR_ORDER = ("red", "green", "blue")
-COLOR_TO_GROUP = {"red": 0, "green": 1, "blue": 2}
-TARGET_PATTERNS = (
-    ("red", "green", "blue", "red", "green"),
-    ("green", "blue", "red", "green", "blue"),
-    ("blue", "red", "green", "blue", "red"),
+from .core.constants import (
+    COLOR_ORDER,
+    COLOR_TO_GROUP,
+    COMPANY_BY_COLOR,
+    CONTAINER_METERS,
+    DAY_COMPANY_SWITCH_PENALTY,
+    DAY_DURATION_SECONDS,
+    DAY_END_SECONDS,
+    DAY_ENERGY_WEIGHT,
+    DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY,
+    DAY_START_SECONDS,
+    DAY_TRUCK_SLOTS,
+    DEFAULT_CONTAINER_COUNT,
+    LENGTH_COST_WEIGHT,
+    LENGTH_SPEED_MPS,
+    NIGHT_COMPANY_TARGET_Z,
+    TARGET_PATTERNS,
+    TRUCK_FLOW_HEADWAY_SECONDS,
+    TRUCK_LANE_WIDTH,
+    TRUCK_LOAD_BUFFER_SECONDS,
+    TRUCK_PICKUP_X,
+    VERTICAL_EMPTY_SPEED_MPS,
+    VERTICAL_LOADED_SPEED_MPS,
+    WIDTH_SPEED_MPS,
+    YARD_HEIGHT,
+    YARD_LENGTH,
+    YARD_WIDTH,
 )
-COMPANY_BY_COLOR = {
-    "red": {"company": "Aster Freight", "truckColor": "#cc4347"},
-    "green": {"company": "Boreal Cargo", "truckColor": "#2d9c60"},
-    "blue": {"company": "Cobalt Haul", "truckColor": "#3e64c7"},
-}
+from .services import day_cycle_service, night_stage_service, optimizer_service, solve_service, stack_service, timing_service
 
+# Backward-compatible mutable settings state.
 ALGORITHM_SETTINGS = schemas.AlgorithmSettings()
 
 
 def yard_config_payload() -> dict:
-    return {
-        "width": YARD_WIDTH,
-        "length": YARD_LENGTH,
-        "height": YARD_HEIGHT,
-        "truckLaneWidth": TRUCK_LANE_WIDTH,
-        "containerCount": DEFAULT_CONTAINER_COUNT,
-        "lengthCostWeight": LENGTH_COST_WEIGHT,
-        "containerMeters": CONTAINER_METERS,
-    }
+    return stack_service.yard_config_payload()
 
 
 def get_algorithm_settings() -> schemas.AlgorithmSettings:
@@ -87,244 +56,94 @@ def update_algorithm_settings(patch: schemas.AlgorithmSettingsPatch) -> schemas.
 
 
 def create_empty_stacks() -> List[List[List[dict]]]:
-    return [[[] for _ in range(YARD_LENGTH)] for _ in range(YARD_WIDTH)]
+    return stack_service.create_empty_stacks()
 
 
 def _normalize_container(container) -> dict:
-    if isinstance(container, dict):
-        cid = container.get("id")
-        color = container.get("color")
-    else:
-        cid = getattr(container, "id", None)
-        color = getattr(container, "color", None)
-
-    if cid is None or color is None:
-        raise ValueError("Container payload must include id and color")
-
-    return {"id": str(cid), "color": str(color)}
+    return stack_service._normalize_container(container)
 
 
 def clone_stacks(stacks) -> List[List[List[dict]]]:
-    return [[[_normalize_container(container) for container in stack] for stack in columns] for columns in stacks]
+    return stack_service.clone_stacks(stacks)
 
 
 def target_color_for_slot(x: int, z: int) -> str:
-    return TARGET_PATTERNS[z % len(TARGET_PATTERNS)][x]
+    return stack_service.target_color_for_slot(x, z)
 
 
-def summarize_stacks(stacks: List[List[List[dict]]]) -> dict:
-    color_count = {"red": 0, "green": 0, "blue": 0}
-    in_target_slot = 0
-    total = 0
-
-    for x in range(YARD_WIDTH):
-        for z in range(YARD_LENGTH):
-            target = target_color_for_slot(x, z)
-            for container in stacks[x][z]:
-                color_count[container["color"]] += 1
-                if container["color"] == target:
-                    in_target_slot += 1
-                total += 1
-
-    score = 1.0 if total == 0 else in_target_slot / total
-    return {
-        "colorCount": color_count,
-        "total": total,
-        "inTargetSlot": in_target_slot,
-        "placementScore": score,
-    }
+def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Mapping[str, float] | None = None) -> dict:
+    return stack_service.summarize_stacks(stacks, score_weights=score_weights)
 
 
 def is_solved(stacks: List[List[List[dict]]]) -> bool:
-    for x in range(YARD_WIDTH):
-        for z in range(YARD_LENGTH):
-            target = target_color_for_slot(x, z)
-            for container in stacks[x][z]:
-                if container["color"] != target:
-                    return False
-    return True
+    return stack_service.is_solved(stacks)
 
 
-def random_configuration(seed: int | None = None, container_count: int = DEFAULT_CONTAINER_COUNT) -> dict:
-    resolved_seed = int(seed if seed is not None else time.time_ns() % 1_000_000_000)
-    rng = random.Random(resolved_seed)
-
-    max_capacity = YARD_WIDTH * YARD_LENGTH * YARD_HEIGHT
-    if container_count > max_capacity:
-        raise ValueError(f"containerCount={container_count} exceeds capacity={max_capacity}")
-
-    stacks = create_empty_stacks()
-    heights = [[0 for _ in range(YARD_LENGTH)] for _ in range(YARD_WIDTH)]
-
-    remaining = container_count
-    while remaining > 0:
-        x = rng.randrange(YARD_WIDTH)
-        z = rng.randrange(YARD_LENGTH)
-        if heights[x][z] >= YARD_HEIGHT:
-            continue
-        heights[x][z] += 1
-        remaining -= 1
-
-    next_id = 1
-    for x in range(YARD_WIDTH):
-        for z in range(YARD_LENGTH):
-            for _ in range(heights[x][z]):
-                color = COLOR_ORDER[rng.randrange(len(COLOR_ORDER))]
-                stacks[x][z].append({"id": f"C{next_id:04d}", "color": color})
-                next_id += 1
-
-    return {
-        "seed": resolved_seed,
-        "stacks": stacks,
-        "summary": summarize_stacks(stacks),
-    }
-
-
-def _state_from_stacks(stacks: List[List[List[dict]]]) -> Tuple[State, Dict[int, dict]]:
-    # Algorithm axis mapping:
-    # algorithm X -> yard length (z), algorithm Y -> yard width (x)
-    yard = [[[] for _ in range(YARD_WIDTH)] for _ in range(YARD_LENGTH)]
-    group: List[int] = []
-    metadata: Dict[int, dict] = {}
-
-    for x in range(YARD_WIDTH):
-        for z in range(YARD_LENGTH):
-            for container in stacks[x][z]:
-                cid = len(group)
-                group_id = COLOR_TO_GROUP[container["color"]]
-                group.append(group_id)
-                yard[z][x].append(cid)
-                metadata[cid] = {"id": container["id"], "color": container["color"]}
-
-    state = State.build_from_yard(X=YARD_LENGTH, Y=YARD_WIDTH, H=YARD_HEIGHT, yard=yard, group=group)
-    state.crane_pos = (0, 0)
-    state.time_used = 0.0
-    return state, metadata
-
-
-def _optimizer_config(settings: schemas.AlgorithmSettings) -> OptimizerConfig:
-    return OptimizerConfig(
-        seed=settings.seed,
-        lam=settings.lam,
-        night_budget_s=settings.nightBudget,
-        energy_weight=settings.energyWeight,
-        energy_x_cost=settings.energyXCost,
-        energy_y_cost=settings.energyYCost,
-        energy_z_cost=settings.energyZCost,
-        top_groups=settings.topGroups,
-        src_limit=settings.srcLimit,
-        dst_limit_per_src=settings.dstLimit,
-        x_radius=settings.xRadius,
-        y_radius=settings.yRadius,
-        y_aware=settings.yAware,
-        tabu_iters=settings.tabuIters,
-        tabu_len=settings.tabuLen,
-        tabu_mode=settings.tabuMode,
-        selection_mode=settings.selectionMode,
-        top_k=settings.topK,
-        non_improving_penalty=settings.nonImprovingPenalty,
-        plateau_iters=settings.plateauIters,
-        shake_enabled=settings.shakeEnabled,
+def random_configuration(
+    seed: int | None = None,
+    container_count: int = DEFAULT_CONTAINER_COUNT,
+    *,
+    yard_x: int = YARD_WIDTH,
+    yard_y: int = YARD_LENGTH,
+    yard_h: int = YARD_HEIGHT,
+    groups: int | None = None,
+    containers_per_group: int | None = None,
+    min_containers_per_group: int | None = None,
+    max_containers_per_group: int | None = None,
+) -> dict:
+    score_weights = stack_service.placement_score_weights_from_algorithm_settings(get_algorithm_settings())
+    return stack_service.random_configuration(
+        seed=seed,
+        container_count=container_count,
+        yard_x=yard_x,
+        yard_y=yard_y,
+        yard_h=yard_h,
+        groups=groups,
+        containers_per_group=containers_per_group,
+        min_containers_per_group=min_containers_per_group,
+        max_containers_per_group=max_containers_per_group,
+        score_weights=score_weights,
     )
+
+
+def _state_from_stacks(stacks: List[List[List[dict]]]):
+    return optimizer_service.state_from_stacks(stacks)
+
+
+def _optimizer_config(settings: schemas.AlgorithmSettings):
+    return optimizer_service.optimizer_config(settings)
 
 
 def _convert_moves_to_frontend(
     moves,
     stacks: List[List[List[dict]]],
     night_budget_s: float | None = None,
-) -> Tuple[List[dict], List[List[List[dict]]]]:
-    working = clone_stacks(stacks)
-    output: List[dict] = []
-    crane_x = 2.0
-    crane_z = 0.0
-    timeline_s = 0.0
-
-    for move in moves:
-        src_x = move.src[1]
-        src_z = move.src[0]
-        dst_x = move.dst[1]
-        dst_z = move.dst[0]
-
-        source = working[src_x][src_z]
-        destination = working[dst_x][dst_z]
-        if not source or len(destination) >= YARD_HEIGHT:
-            continue
-
-        from_y = len(source) - 1
-        to_y = len(destination)
-        duration_seconds = _crane_move_seconds(
-            crane_x=crane_x,
-            crane_z=crane_z,
-            src_x=src_x,
-            src_z=src_z,
-            src_level=from_y,
-            dst_x=dst_x,
-            dst_z=dst_z,
-            dst_level=to_y,
-        )
-        t_start = timeline_s
-        t_end = t_start + duration_seconds
-        if night_budget_s is not None and t_end > night_budget_s:
-            break
-
-        container = source.pop()
-        timeline_s = t_end
-        crane_x = float(dst_x)
-        crane_z = float(dst_z)
-        destination.append(container)
-
-        weighted_cost = abs(src_x - dst_x) + LENGTH_COST_WEIGHT * abs(src_z - dst_z)
-        output.append(
-            {
-                "id": container["id"],
-                "color": container["color"],
-                "from": {"x": src_x, "z": src_z, "y": from_y},
-                "to": {"x": dst_x, "z": dst_z, "y": to_y},
-                "weightedCost": weighted_cost,
-                "tStart": t_start,
-                "tEnd": t_end,
-                "durationSeconds": duration_seconds,
-            }
-        )
-
-    return output, working
+):
+    return optimizer_service.convert_moves_to_frontend(moves, stacks, night_budget_s=night_budget_s)
 
 
 def _slot_to_stack_z(slot_index: int) -> int:
-    slot_span = YARD_LENGTH / DAY_TRUCK_SLOTS
-    z = int(round((slot_index + 0.5) * slot_span - 0.5))
-    return max(0, min(YARD_LENGTH - 1, z))
+    return day_cycle_service.slot_to_stack_z(slot_index)
 
 
-def _top_containers(stacks: List[List[List[dict]]]) -> List[Tuple[int, int, int, dict]]:
-    out: List[Tuple[int, int, int, dict]] = []
-    for x in range(YARD_WIDTH):
-        for z in range(YARD_LENGTH):
-            stack = stacks[x][z]
-            if not stack:
-                continue
-            y = len(stack) - 1
-            out.append((x, z, y, stack[y]))
-    return out
+def _top_containers(stacks: List[List[List[dict]]]):
+    return day_cycle_service.top_containers(stacks)
 
 
 def _weighted_xy_cost(src_x: int | float, src_z: int | float, dst_x: int | float, dst_z: int | float) -> float:
-    return float(abs(src_x - dst_x) + LENGTH_COST_WEIGHT * abs(src_z - dst_z))
+    return timing_service.weighted_xy_cost(src_x, src_z, dst_x, dst_z)
 
 
 def _horizontal_travel_seconds(src_x: int | float, src_z: int | float, dst_x: int | float, dst_z: int | float) -> float:
-    dx_m = abs(src_x - dst_x) * CONTAINER_METERS["width"]
-    dz_m = abs(src_z - dst_z) * CONTAINER_METERS["length"]
-    return dx_m / WIDTH_SPEED_MPS + dz_m / LENGTH_SPEED_MPS
+    return timing_service.horizontal_travel_seconds(src_x, src_z, dst_x, dst_z)
 
 
 def _stack_level_height_m(level: int) -> float:
-    # Level 0 top sits at one container height above ground.
-    return (level + 1) * CONTAINER_METERS["height"]
+    return timing_service.stack_level_height_m(level)
 
 
 def _travel_hook_height_m() -> float:
-    return (YARD_HEIGHT + 1) * CONTAINER_METERS["height"]
+    return timing_service.travel_hook_height_m()
 
 
 def _crane_move_seconds(
@@ -338,24 +157,15 @@ def _crane_move_seconds(
     dst_z: int | float,
     dst_level: int,
 ) -> float:
-    travel_height = _travel_hook_height_m()
-    pick_height = _stack_level_height_m(src_level)
-    place_height = _stack_level_height_m(dst_level)
-
-    horizontal_to_source = _horizontal_travel_seconds(crane_x, crane_z, src_x, src_z)
-    lower_empty = max(0.0, travel_height - pick_height) / VERTICAL_EMPTY_SPEED_MPS
-    lift_loaded = max(0.0, travel_height - pick_height) / VERTICAL_LOADED_SPEED_MPS
-    horizontal_with_load = _horizontal_travel_seconds(src_x, src_z, dst_x, dst_z)
-    lower_loaded = max(0.0, travel_height - place_height) / VERTICAL_LOADED_SPEED_MPS
-    raise_empty = max(0.0, travel_height - place_height) / VERTICAL_EMPTY_SPEED_MPS
-
-    return (
-        horizontal_to_source
-        + lower_empty
-        + lift_loaded
-        + horizontal_with_load
-        + lower_loaded
-        + raise_empty
+    return timing_service.crane_move_seconds(
+        crane_x=crane_x,
+        crane_z=crane_z,
+        src_x=src_x,
+        src_z=src_z,
+        src_level=src_level,
+        dst_x=dst_x,
+        dst_z=dst_z,
+        dst_level=dst_level,
     )
 
 
@@ -366,201 +176,16 @@ def _estimate_truck_timing(
     slot_index: int,
     lane_flow_free_at: float,
 ) -> Tuple[float, float, float]:
-    approach_time = 38.0 + slot_index * 2.0
-    arrival_target = max(0.0, load_start - approach_time)
-    arrival_time = max(arrival_target, lane_flow_free_at)
-    lane_cursor = arrival_time + TRUCK_FLOW_HEADWAY_SECONDS
-
-    depart_ready = load_end + TRUCK_LOAD_BUFFER_SECONDS
-    depart_time = max(depart_ready, lane_cursor)
-    lane_wait_seconds = depart_time - depart_ready
-    return arrival_time, depart_time, lane_wait_seconds
+    return day_cycle_service.estimate_truck_timing(
+        load_start=load_start,
+        load_end=load_end,
+        slot_index=slot_index,
+        lane_flow_free_at=lane_flow_free_at,
+    )
 
 
 def _build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
-    rng = random.Random(day_seed ^ 0xBADC0DE)
-    working = clone_stacks(stacks)
-    remaining_by_color = {"red": 0, "green": 0, "blue": 0}
-    for x in range(YARD_WIDTH):
-        for z in range(YARD_LENGTH):
-            for container in working[x][z]:
-                remaining_by_color[container["color"]] += 1
-    slot_z_map = [_slot_to_stack_z(slot) for slot in range(DAY_TRUCK_SLOTS)]
-    slot_free_at = [0.0] * DAY_TRUCK_SLOTS
-    lane_flow_free_at = 0.0
-    company_trips: Dict[str, int] = {
-        COMPANY_BY_COLOR["red"]["company"]: 0,
-        COMPANY_BY_COLOR["green"]["company"]: 0,
-        COMPANY_BY_COLOR["blue"]["company"]: 0,
-    }
-
-    crane_time = 0.0
-    crane_x = 2.0
-    crane_z = 0.0
-    truck_seq = 0
-    total_crane_weighted_cost = 0.0
-    total_lane_wait_seconds = 0.0
-    jobs: List[dict] = []
-
-    while True:
-        candidates = _top_containers(working)
-        if not candidates:
-            break
-
-        best_choice = None
-        best_score = None
-        for source_x, source_z, source_y, container in candidates:
-            for slot_index in range(DAY_TRUCK_SLOTS):
-                slot_z = slot_z_map[slot_index]
-                horizontal_weighted_cost = _weighted_xy_cost(crane_x, crane_z, source_x, source_z) + _weighted_xy_cost(
-                    source_x,
-                    source_z,
-                    TRUCK_PICKUP_X,
-                    slot_z,
-                )
-                crane_task_seconds = _crane_move_seconds(
-                    crane_x=crane_x,
-                    crane_z=crane_z,
-                    src_x=source_x,
-                    src_z=source_z,
-                    src_level=source_y,
-                    dst_x=TRUCK_PICKUP_X,
-                    dst_z=slot_z,
-                    dst_level=0,
-                )
-                tentative_load_start = max(crane_time, slot_free_at[slot_index])
-                tentative_load_end = tentative_load_start + crane_task_seconds
-                arrival_time, depart_time, lane_wait_seconds = _estimate_truck_timing(
-                    load_start=tentative_load_start,
-                    load_end=tentative_load_end,
-                    slot_index=slot_index,
-                    lane_flow_free_at=lane_flow_free_at,
-                )
-                if depart_time > DAY_DURATION_SECONDS:
-                    continue
-                same_company_bonus = -0.35 if jobs and jobs[-1]["containerColor"] == container["color"] else 0.0
-                company_switch_penalty = 0.0
-                if jobs and jobs[-1]["containerColor"] != container["color"]:
-                    previous_color = jobs[-1]["containerColor"]
-                    company_switch_penalty += DAY_COMPANY_SWITCH_PENALTY
-                    if remaining_by_color.get(previous_color, 0) > 0:
-                        company_switch_penalty += DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY
-                # Optimize for crane efficiency first: expensive lengthwise crane movement
-                # is encoded in horizontal_weighted_cost (length axis weighted 10x).
-                score = (
-                    depart_time
-                    + lane_wait_seconds * 2.0
-                    + horizontal_weighted_cost * DAY_ENERGY_WEIGHT
-                    + company_switch_penalty
-                    + same_company_bonus
-                    + rng.random() * 0.001
-                )
-                if best_score is None or score < best_score:
-                    best_score = score
-                    best_choice = (
-                        source_x,
-                        source_z,
-                        source_y,
-                        container,
-                        slot_index,
-                        slot_z,
-                        horizontal_weighted_cost,
-                        crane_task_seconds,
-                        tentative_load_start,
-                        tentative_load_end,
-                        arrival_time,
-                        depart_time,
-                        lane_wait_seconds,
-                    )
-
-        if best_choice is None:
-            break
-
-        (
-            source_x,
-            source_z,
-            source_y,
-            container,
-            slot_index,
-            slot_z,
-            horizontal_weighted_cost,
-            crane_task_seconds,
-            load_start,
-            load_end,
-            arrival_time,
-            depart_time,
-            lane_wait,
-        ) = best_choice
-
-        stack = working[source_x][source_z]
-        if not stack:
-            continue
-        top = stack.pop()
-        if top["id"] != container["id"]:
-            # Defensive correction in case of stale candidate tie during mutation.
-            container = top
-            source_y = len(stack)
-
-        company = COMPANY_BY_COLOR[container["color"]]["company"]
-        company_color = COMPANY_BY_COLOR[container["color"]]["truckColor"]
-        company_trips[company] += 1
-        remaining_by_color[container["color"]] -= 1
-
-        lane_flow_free_at = arrival_time + TRUCK_FLOW_HEADWAY_SECONDS
-        lane_flow_free_at = depart_time + TRUCK_FLOW_HEADWAY_SECONDS
-        slot_free_at[slot_index] = depart_time + TRUCK_FLOW_HEADWAY_SECONDS
-
-        truck_seq += 1
-        job = {
-            "jobIndex": len(jobs) + 1,
-            "truckId": f"{company.split()[0][0]}-{truck_seq:03d}",
-            "company": company,
-            "companyColor": company_color,
-            "containerId": container["id"],
-            "containerColor": container["color"],
-            "source": {"x": source_x, "z": source_z, "y": source_y},
-            "slotIndex": slot_index,
-            "slotZ": slot_z,
-            "arrivalTime": arrival_time,
-            "loadStartTime": load_start,
-            "loadEndTime": load_end,
-            "departTime": depart_time,
-            "craneWeightedCost": horizontal_weighted_cost,
-            "laneWaitSeconds": lane_wait,
-            "craneTaskSeconds": crane_task_seconds,
-        }
-        jobs.append(job)
-
-        crane_time = load_end
-        crane_x = float(TRUCK_PICKUP_X)
-        crane_z = float(slot_z)
-        total_crane_weighted_cost += horizontal_weighted_cost
-        total_lane_wait_seconds += lane_wait
-
-    makespan_seconds = max((job["departTime"] for job in jobs), default=0.0)
-    remaining_containers = sum(len(stack) for column in working for stack in column)
-    score_denominator = total_crane_weighted_cost + total_lane_wait_seconds * 2.0 + makespan_seconds * 0.2 + 1.0
-    score = 10000.0 / score_denominator
-
-    return {
-        "slots": DAY_TRUCK_SLOTS,
-        "jobs": jobs,
-        "stats": {
-            "totalJobs": len(jobs),
-            "trucksUsed": len({job["truckId"] for job in jobs}),
-            "companyTrips": company_trips,
-            "totalCraneWeightedCost": total_crane_weighted_cost,
-            "totalLaneWaitSeconds": total_lane_wait_seconds,
-            "makespanSeconds": makespan_seconds,
-            "score": score,
-            "lengthCostWeight": LENGTH_COST_WEIGHT,
-            "dayStartSeconds": DAY_START_SECONDS,
-            "dayEndSeconds": DAY_END_SECONDS,
-            "dayDurationSeconds": DAY_DURATION_SECONDS,
-            "remainingContainers": remaining_containers,
-            "completedWithinWindow": remaining_containers == 0,
-        },
-    }
+    return day_cycle_service.build_day_cycle_plan(stacks, day_seed=day_seed)
 
 
 def _night_stage_for_day(
@@ -570,195 +195,27 @@ def _night_stage_for_day(
     *,
     start_time_s: float = 0.0,
     crane_start: Tuple[float, float] = (2.0, 0.0),
-) -> Tuple[List[dict], List[List[List[dict]]], float]:
-    rng = random.Random(day_seed ^ 0x13579BDF)
-    working = clone_stacks(stacks)
-    moves: List[dict] = []
-    crane_x = float(crane_start[0])
-    crane_z = float(crane_start[1])
-    time_used = float(start_time_s)
-
-    def find_open_z(dst_x: int, center_z: int) -> int | None:
-        for radius in range(YARD_LENGTH):
-            candidates = [center_z] if radius == 0 else [center_z - radius, center_z + radius]
-            for z in candidates:
-                if 0 <= z < YARD_LENGTH and len(working[dst_x][z]) < YARD_HEIGHT:
-                    return z
-        return None
-
-    max_iters = 40
-    for _ in range(max_iters):
-        sources: List[Tuple[int, int, int, dict]] = []
-        for src_x in range(YARD_WIDTH):
-            for src_z in range(YARD_LENGTH):
-                stack = working[src_x][src_z]
-                if not stack:
-                    continue
-                # Stage containers toward truck-side width only.
-                if src_x >= YARD_WIDTH - 1:
-                    continue
-                sources.append((src_x, src_z, len(stack) - 1, stack[-1]))
-
-        if not sources:
-            break
-
-        best_candidate = None
-        best_score = None
-
-        for src_x, src_z, src_y, container in sources:
-            target_z = NIGHT_COMPANY_TARGET_Z.get(container["color"], src_z)
-            for dst_x in (YARD_WIDTH - 1, YARD_WIDTH - 2):
-                if dst_x <= src_x:
-                    continue
-                dst_z = find_open_z(dst_x, target_z)
-                if dst_z is None:
-                    continue
-
-                dst_y = len(working[dst_x][dst_z])
-                duration_seconds = _crane_move_seconds(
-                    crane_x=crane_x,
-                    crane_z=crane_z,
-                    src_x=src_x,
-                    src_z=src_z,
-                    src_level=src_y,
-                    dst_x=dst_x,
-                    dst_z=dst_z,
-                    dst_level=dst_y,
-                )
-                if time_used + duration_seconds > night_budget_s:
-                    continue
-
-                width_gain = float(dst_x - src_x) * CONTAINER_METERS["width"]
-                target_alignment_gain = max(0, abs(src_z - target_z) - abs(dst_z - target_z)) * CONTAINER_METERS["length"]
-                length_penalty = abs(dst_z - src_z) * CONTAINER_METERS["length"] * 0.05
-                stack_penalty = dst_y * 0.12
-                jitter = rng.random() * 0.0005
-                move_score = (
-                    width_gain * 1.6
-                    + target_alignment_gain * 0.5
-                    - length_penalty
-                    - stack_penalty
-                    + jitter
-                ) / max(duration_seconds, 0.01)
-
-                if best_score is None or move_score > best_score:
-                    best_score = move_score
-                    best_candidate = (
-                        container,
-                        src_x,
-                        src_z,
-                        src_y,
-                        dst_x,
-                        dst_z,
-                        dst_y,
-                        duration_seconds,
-                    )
-
-        if best_candidate is None:
-            break
-
-        (
-            container,
-            src_x,
-            src_z,
-            src_y,
-            dst_x,
-            dst_z,
-            dst_y,
-            duration_seconds,
-        ) = best_candidate
-
-        src_stack = working[src_x][src_z]
-        dst_stack = working[dst_x][dst_z]
-        moved = src_stack.pop()
-        dst_stack.append(moved)
-
-        t_start = time_used
-        t_end = t_start + duration_seconds
-        time_used = t_end
-        crane_x = float(dst_x)
-        crane_z = float(dst_z)
-
-        moves.append(
-            {
-                "id": container["id"],
-                "color": container["color"],
-                "from": {"x": src_x, "z": src_z, "y": src_y},
-                "to": {"x": dst_x, "z": dst_z, "y": dst_y},
-                "weightedCost": _weighted_xy_cost(src_x, src_z, dst_x, dst_z),
-                "tStart": t_start,
-                "tEnd": t_end,
-                "durationSeconds": duration_seconds,
-            }
-        )
-
-    return moves, working, time_used
+):
+    return night_stage_service.night_stage_for_day(
+        stacks,
+        night_budget_s,
+        day_seed,
+        start_time_s=start_time_s,
+        crane_start=crane_start,
+    )
 
 
 def solve_stacks(stacks: List[List[List[dict]]], settings_patch: schemas.AlgorithmSettingsPatch | None = None) -> dict:
-    if len(stacks) != YARD_WIDTH or any(len(column) != YARD_LENGTH for column in stacks):
-        raise ValueError("Invalid stack dimensions")
-
     settings = get_algorithm_settings()
     if settings_patch is not None:
         merged = settings.model_dump()
         merged.update(settings_patch.model_dump(exclude_none=True))
         settings = schemas.AlgorithmSettings(**merged)
+    return solve_service.solve_stacks(stacks, settings)
 
-    initial = clone_stacks(stacks)
-    state, _metadata = _state_from_stacks(initial)
-    cfg = _optimizer_config(settings)
 
-    greedy_state = state.clone()
-    greedy_moves = greedy_plan(greedy_state, cfg)
-
-    tabu_state = greedy_state.clone()
-    tabu_moves, _best_state = tabu_improve(tabu_state, cfg)
-
-    full_moves = list(greedy_moves) + list(tabu_moves)
-    frontend_moves, final_stacks = _convert_moves_to_frontend(
-        full_moves,
-        initial,
-        night_budget_s=float(settings.nightBudget),
-    )
-    algorithm_night_time = float(frontend_moves[-1]["tEnd"]) if frontend_moves else 0.0
-    crane_start = (float(frontend_moves[-1]["to"]["x"]), float(frontend_moves[-1]["to"]["z"])) if frontend_moves else (2.0, 0.0)
-
-    day_prep_moves, staged_stacks, staged_end_time = _night_stage_for_day(
-        final_stacks,
-        night_budget_s=float(settings.nightBudget),
-        day_seed=settings.seed,
-        start_time_s=algorithm_night_time,
-        crane_start=crane_start,
-    )
-    if day_prep_moves:
-        frontend_moves.extend(day_prep_moves)
-        final_stacks = staged_stacks
-    total_night_time = max(algorithm_night_time, staged_end_time)
-
-    total_weighted_cost = sum(move["weightedCost"] for move in frontend_moves)
-    initial_summary = summarize_stacks(initial)
-    final_summary = summarize_stacks(final_stacks)
-
-    night_stats = {
-        "greedyMoveCount": len(greedy_moves),
-        "tabuMoveCount": len(tabu_moves),
-        "dayPrepMoveCount": len(day_prep_moves),
-        "totalMoves": len(frontend_moves),
-        "timeUsedSeconds": total_night_time,
-        "budgetSeconds": float(settings.nightBudget),
-        "startPlacementScore": initial_summary["placementScore"],
-        "endPlacementScore": final_summary["placementScore"],
-        "lengthCostWeight": LENGTH_COST_WEIGHT,
-    }
-    day_cycle = _build_day_cycle_plan(final_stacks, day_seed=settings.seed)
-
-    return {
-        "moves": frontend_moves,
-        "solved": is_solved(final_stacks),
-        "totalWeightedCost": total_weighted_cost,
-        "finalSummary": final_summary,
-        "finalStacks": final_stacks,
-        "nightStats": night_stats,
-        "dayCycle": day_cycle,
-    }
+def __getattr__(name: str):
+    """Backwards-compatible attribute access for mutable settings state."""
+    if name == "ALGORITHM_SETTINGS":
+        return ALGORITHM_SETTINGS
+    raise AttributeError(name)

@@ -73,7 +73,7 @@ body {
   border-radius: 12px;
   background: linear-gradient(160deg, #ffffff, #eff5fb);
   display: grid;
-  grid-template-columns: repeat(8, max-content) 1fr;
+  grid-template-columns: repeat(6, max-content) 1fr;
   gap: 10px;
   align-items: center;
 }
@@ -238,6 +238,13 @@ body {
   font-size: 0.82rem;
 }
 
+.legend-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
 .scene-legend span {
   display: inline-flex;
   align-items: center;
@@ -250,18 +257,6 @@ body {
   height: 12px;
   border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-.swatch.red {
-  background: var(--danger);
-}
-
-.swatch.green {
-  background: var(--ok);
-}
-
-.swatch.blue {
-  background: #4b6ddb;
 }
 
 .lane-note {

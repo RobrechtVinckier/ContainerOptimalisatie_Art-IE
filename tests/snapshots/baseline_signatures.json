@@ -1,0 +1,415 @@
+{
+  "algorithm_cli_signature_seed_1": {
+    "firstMoveLines": [],
+    "greedyBudgetSeconds": 28800.0,
+    "greedyClusterEnd": 3.0,
+    "greedyClusterStart": 17.5,
+    "greedyMoves": 5,
+    "greedyTimeUsedSeconds": 30.0,
+    "initialClusterCost": 17.5,
+    "tabuBestTimeUsedSeconds": 30.0,
+    "tabuBudgetSeconds": 28800.0,
+    "tabuClusterEnd": 3.0,
+    "tabuClusterStart": 17.5,
+    "tabuMovesApplied": 0,
+    "truncatedMoveCount": 0
+  },
+  "random_configuration_seed_2025_count_18": {
+    "first5": [
+      {
+        "color": "red",
+        "id": "C0001"
+      },
+      {
+        "color": "blue",
+        "id": "C0002"
+      },
+      {
+        "color": "red",
+        "id": "C0003"
+      },
+      {
+        "color": "red",
+        "id": "C0004"
+      },
+      {
+        "color": "red",
+        "id": "C0005"
+      }
+    ],
+    "heights": [
+      [
+        0,
+        1,
+        0,
+        1,
+        0,
+        0,
+        2,
+        0,
+        1,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        1,
+        2,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "last5": [
+      {
+        "color": "blue",
+        "id": "C0014"
+      },
+      {
+        "color": "green",
+        "id": "C0015"
+      },
+      {
+        "color": "green",
+        "id": "C0016"
+      },
+      {
+        "color": "green",
+        "id": "C0017"
+      },
+      {
+        "color": "blue",
+        "id": "C0018"
+      }
+    ],
+    "seed": 2025,
+    "summary": {
+      "colorCount": {
+        "blue": 5,
+        "green": 4,
+        "red": 9
+      },
+      "inTargetSlot": 10,
+      "placementScore": 0.5702702702702703,
+      "total": 18
+    }
+  },
+  "solve_stacks_seed_2025_count_18": {
+    "dayStats": {
+      "companyTrips": {
+        "Aster Freight": 9,
+        "Boreal Cargo": 4,
+        "Cobalt Haul": 5
+      },
+      "completedWithinWindow": true,
+      "dayDurationSeconds": 57600,
+      "dayEndSeconds": 79200,
+      "dayStartSeconds": 21600,
+      "lengthCostWeight": 10,
+      "makespanSeconds": 1238.136667,
+      "remainingContainers": 0,
+      "score": 24.653171,
+      "totalCraneWeightedCost": 157.0,
+      "totalJobs": 18,
+      "totalLaneWaitSeconds": 0.0,
+      "trucksUsed": 18
+    },
+    "finalSummary": {
+      "colorCount": {
+        "blue": 5,
+        "green": 4,
+        "red": 9
+      },
+      "inTargetSlot": 17,
+      "placementScore": 0.9486486486486486,
+      "total": 18
+    },
+    "final_heights": [
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        4,
+        4,
+        4,
+        1,
+        0,
+        3,
+        0,
+        0,
+        2,
+        0
+      ]
+    ],
+    "first_last_moves": [
+      {
+        "durationSeconds": 49.78,
+        "from": {
+          "x": 4,
+          "y": 0,
+          "z": 0
+        },
+        "id": "C0015",
+        "tEnd": 49.78,
+        "tStart": 0.0,
+        "to": {
+          "x": 4,
+          "y": 2,
+          "z": 1
+        },
+        "weightedCost": 10
+      },
+      {
+        "durationSeconds": 70.268333,
+        "from": {
+          "x": 0,
+          "y": 0,
+          "z": 1
+        },
+        "id": "C0001",
+        "tEnd": 120.048333,
+        "tStart": 49.78,
+        "to": {
+          "x": 0,
+          "y": 1,
+          "z": 3
+        },
+        "weightedCost": 20
+      },
+      {
+        "durationSeconds": 76.126667,
+        "from": {
+          "x": 3,
+          "y": 0,
+          "z": 2
+        },
+        "id": "C0013",
+        "tEnd": 196.175,
+        "tStart": 120.048333,
+        "to": {
+          "x": 2,
+          "y": 0,
+          "z": 3
+        },
+        "weightedCost": 11
+      },
+      {
+        "durationSeconds": 129.998333,
+        "from": {
+          "x": 0,
+          "y": 1,
+          "z": 9
+        },
+        "id": "C0007",
+        "tEnd": 326.173333,
+        "tStart": 196.175,
+        "to": {
+          "x": 1,
+          "y": 0,
+          "z": 8
+        },
+        "weightedCost": 11
+      },
+      {
+        "durationSeconds": 66.608333,
+        "from": {
+          "x": 0,
+          "y": 0,
+          "z": 9
+        },
+        "id": "C0006",
+        "tEnd": 392.781667,
+        "tStart": 326.173333,
+        "to": {
+          "x": 0,
+          "y": 1,
+          "z": 8
+        },
+        "weightedCost": 10
+      },
+      {
+        "durationSeconds": 116.588333,
+        "from": {
+          "x": 3,
+          "y": 0,
+          "z": 5
+        },
+        "id": "C0018",
+        "tEnd": 9169.491667,
+        "tStart": 9052.903333,
+        "to": {
+          "x": 4,
+          "y": 1,
+          "z": 8
+        },
+        "weightedCost": 31.0
+      },
+      {
+        "durationSeconds": 123.393333,
+        "from": {
+          "x": 3,
+          "y": 3,
+          "z": 1
+        },
+        "id": "C0008",
+        "tEnd": 9292.885,
+        "tStart": 9169.491667,
+        "to": {
+          "x": 4,
+          "y": 1,
+          "z": 2
+        },
+        "weightedCost": 11.0
+      },
+      {
+        "durationSeconds": 50.253333,
+        "from": {
+          "x": 3,
+          "y": 2,
+          "z": 1
+        },
+        "id": "C0010",
+        "tEnd": 9343.138333,
+        "tStart": 9292.885,
+        "to": {
+          "x": 4,
+          "y": 2,
+          "z": 2
+        },
+        "weightedCost": 11.0
+      },
+      {
+        "durationSeconds": 50.253333,
+        "from": {
+          "x": 3,
+          "y": 1,
+          "z": 1
+        },
+        "id": "C0001",
+        "tEnd": 9393.391667,
+        "tStart": 9343.138333,
+        "to": {
+          "x": 4,
+          "y": 3,
+          "z": 2
+        },
+        "weightedCost": 11.0
+      },
+      {
+        "durationSeconds": 85.876667,
+        "from": {
+          "x": 3,
+          "y": 0,
+          "z": 1
+        },
+        "id": "C0009",
+        "tEnd": 9479.268333,
+        "tStart": 9393.391667,
+        "to": {
+          "x": 4,
+          "y": 0,
+          "z": 3
+        },
+        "weightedCost": 21.0
+      }
+    ],
+    "moves_len": 131,
+    "nightStats": {
+      "budgetSeconds": 28800.0,
+      "dayPrepMoveCount": 15,
+      "endPlacementScore": 0.948649,
+      "greedyMoveCount": 7,
+      "lengthCostWeight": 10,
+      "startPlacementScore": 0.57027,
+      "tabuMoveCount": 109,
+      "timeUsedSeconds": 9479.268333,
+      "totalMoves": 131
+    },
+    "solved": false,
+    "totalWeightedCost": 1929.0
+  }
+}

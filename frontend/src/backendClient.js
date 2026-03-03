@@ -21,10 +21,30 @@ async function request(path, options = {}) {
   return response.json();
 }
 
-export async function requestRandomConfiguration(seed = Date.now()) {
+export async function requestRandomConfiguration(options = {}) {
+  const normalized = typeof options === "number" ? { seed: options } : options;
+  const payload = {
+    containerCount: Number.isFinite(normalized.containerCount) ? Number(normalized.containerCount) : 130,
+  };
+  if (Number.isFinite(normalized.groups)) {
+    payload.groups = Number(normalized.groups);
+  }
+  if (Number.isFinite(normalized.minContainersPerGroup)) {
+    payload.minContainersPerGroup = Number(normalized.minContainersPerGroup);
+  }
+  if (Number.isFinite(normalized.maxContainersPerGroup)) {
+    payload.maxContainersPerGroup = Number(normalized.maxContainersPerGroup);
+  }
+  if (Number.isFinite(normalized.containersPerGroup)) {
+    payload.containersPerGroup = Number(normalized.containersPerGroup);
+  }
+  if (normalized.seed !== null && normalized.seed !== undefined) {
+    payload.seed = Number(normalized.seed);
+  }
+
   return request("/api/simulations/random", {
     method: "POST",
-    body: JSON.stringify({ seed }),
+    body: JSON.stringify(payload),
   });
 }
 

@@ -37,7 +37,7 @@ python3 -m unittest -v
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 XY = Tuple[int, int]
 
@@ -87,6 +87,8 @@ class State:
     ymin: List[int] = field(default_factory=list)
     ymax: List[int] = field(default_factory=list)
     spread: List[float] = field(default_factory=list)
+    # number of stacks that contain at least one container of each group
+    group_stack_occupancy: List[int] = field(default_factory=list)
 
     def num_groups(self) -> int:
         return max(self.group) + 1 if self.group else 0
@@ -127,6 +129,139 @@ class State:
     def cluster_cost(self) -> float:
         return float(sum(self.spread))
 
+    @staticmethod
+    def _stack_top_group_mismatch_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
+        """Penalty for top group being incompatible with the stack composition."""
+        if not stack:
+            return 0.0
+        top_group = group[stack[-1]]
+        mismatch = 0
+        for cid in stack:
+            if group[cid] != top_group:
+                mismatch += 1
+        return float(mismatch)
+
+    @staticmethod
+    def _stack_expected_rehandles_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
+        """Cheap proxy of future rehandles: number of cross-group inversion pairs."""
+        n = len(stack)
+        if n <= 1:
+            return 0.0
+        rehandles = 0
+        for lower_idx in range(n):
+            g_lower = group[stack[lower_idx]]
+            for upper_idx in range(lower_idx + 1, n):
+                if group[stack[upper_idx]] != g_lower:
+                    rehandles += 1
+        return float(rehandles)
+
+    @staticmethod
+    def _stack_impurity_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
+        """Containers not belonging to the majority group in this stack."""
+        if not stack:
+            return 0.0
+        counts: Dict[int, int] = {}
+        for cid in stack:
+            g = group[cid]
+            counts[g] = counts.get(g, 0) + 1
+        majority = max(counts.values())
+        return float(len(stack) - majority)
+
+    @staticmethod
+    def _stack_buried_foreign_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
+        """
+        Depth-weighted burial penalty for cross-group blocking inside one stack.
+
+        If a container has other-group containers above it, penalty increases with
+        vertical distance. This strongly penalizes "group A buried under group B".
+        """
+        n = len(stack)
+        if n <= 1:
+            return 0.0
+        penalty = 0.0
+        for lower_idx in range(n):
+            lower_group = group[stack[lower_idx]]
+            for upper_idx in range(lower_idx + 1, n):
+                if group[stack[upper_idx]] != lower_group:
+                    penalty += float(upper_idx - lower_idx)
+        return penalty
+
+    def stack_top_group_mismatch_penalty(self, xy: XY) -> float:
+        return self._stack_top_group_mismatch_from_stack(self.stack(xy), self.group)
+
+    def stack_expected_rehandles_penalty(self, xy: XY) -> float:
+        return self._stack_expected_rehandles_from_stack(self.stack(xy), self.group)
+
+    def stack_impurity_penalty(self, xy: XY) -> float:
+        return self._stack_impurity_from_stack(self.stack(xy), self.group)
+
+    def stack_buried_foreign_penalty(self, xy: XY) -> float:
+        return self._stack_buried_foreign_from_stack(self.stack(xy), self.group)
+
+    def stack_quality_penalty(
+        self,
+        xy: XY,
+        top_mismatch_weight: float = 1.0,
+        rehandle_weight: float = 1.0,
+        impurity_weight: float = 0.0,
+        buried_foreign_weight: float = 0.0,
+    ) -> float:
+        """Weighted stack-quality penalty for one stack."""
+        top_penalty = self.stack_top_group_mismatch_penalty(xy)
+        rehandle_penalty = self.stack_expected_rehandles_penalty(xy)
+        impurity_penalty = self.stack_impurity_penalty(xy)
+        buried_penalty = self.stack_buried_foreign_penalty(xy)
+        return (
+            top_mismatch_weight * top_penalty
+            + rehandle_weight * rehandle_penalty
+            + impurity_weight * impurity_penalty
+            + buried_foreign_weight * buried_penalty
+        )
+
+    def total_stack_quality_cost(
+        self,
+        top_mismatch_weight: float = 1.0,
+        rehandle_weight: float = 1.0,
+        impurity_weight: float = 0.0,
+        buried_foreign_weight: float = 0.0,
+    ) -> float:
+        """Recompute weighted stack-quality cost over the whole yard."""
+        total = 0.0
+        for x in range(self.X):
+            for y in range(self.Y):
+                total += self.stack_quality_penalty(
+                    (x, y),
+                    top_mismatch_weight=top_mismatch_weight,
+                    rehandle_weight=rehandle_weight,
+                    impurity_weight=impurity_weight,
+                    buried_foreign_weight=buried_foreign_weight,
+                )
+        return total
+
+    def _ensure_group_stack_occupancy(self) -> None:
+        """Lazy rebuild of group->occupied-stack counts when needed."""
+        g_count = self.num_groups()
+        if len(self.group_stack_occupancy) == g_count:
+            return
+        occupancy = [0 for _ in range(g_count)]
+        for x in range(self.X):
+            for y in range(self.Y):
+                if not self.yard[x][y]:
+                    continue
+                present = set(self.group[cid] for cid in self.yard[x][y])
+                for g in present:
+                    occupancy[g] += 1
+        self.group_stack_occupancy = occupancy
+
+    def total_group_fragmentation_cost(self) -> float:
+        """Penalty for spreading one group over many stacks."""
+        self._ensure_group_stack_occupancy()
+        total = 0.0
+        for occupied in self.group_stack_occupancy:
+            if occupied > 0:
+                total += float(occupied - 1)
+        return total
+
     def compute_cluster_cost_bruteforce(self) -> float:
         """Recompute full ClusterCost from container positions (slow, for tests)."""
         G = self.num_groups()
@@ -158,6 +293,40 @@ class State:
         for y in range(self.Y):
             cy += y * self.count_y[g][y]
         return (cx / total, cy / total)
+
+    def is_on_group_boundary(self, container_id: int, xy: XY) -> bool:
+        """Whether the stack coordinate lies on this container group's bounding box."""
+        g = self.group[container_id]
+        x, y = xy
+        return x == self.xmin[g] or x == self.xmax[g] or y == self.ymin[g] or y == self.ymax[g]
+
+    def stack_group_counts(self, xy: XY) -> Dict[int, int]:
+        """Group histogram for one stack."""
+        counts: Dict[int, int] = {}
+        for cid in self.stack(xy):
+            g = self.group[cid]
+            counts[g] = counts.get(g, 0) + 1
+        return counts
+
+    def stack_compatibility_penalty_for_group(self, group_index: int, xy: XY) -> float:
+        """Compatibility proxy: lower is better for placing a group into this stack."""
+        stack = self.stack(xy)
+        if not stack:
+            return 0.0
+        top_group = self.group[stack[-1]]
+        top_mismatch = 0.0 if top_group == group_index else 1.0
+        different = 0
+        for cid in stack:
+            if self.group[cid] != group_index:
+                different += 1
+        return top_mismatch + 0.5 * float(different)
+
+    def _count_group_in_stack(self, xy: XY, group_index: int) -> int:
+        count = 0
+        for cid in self.stack(xy):
+            if self.group[cid] == group_index:
+                count += 1
+        return count
 
     # -------------------------
     # Bounds helpers
@@ -224,6 +393,83 @@ class State:
         new_spread = self._spread_from_bounds(new_xmin, new_xmax, new_ymin, new_ymax)
         return new_spread - self.spread[g]
 
+    def delta_stack_quality_for_move(
+        self,
+        container_id: int,
+        src: XY,
+        dst: XY,
+        *,
+        top_mismatch_weight: float = 1.0,
+        rehandle_weight: float = 1.0,
+        impurity_weight: float = 0.0,
+        buried_foreign_weight: float = 0.0,
+    ) -> float:
+        """
+        Delta weighted stack-quality penalty for a legal top move src->dst.
+
+        Only source and destination stacks can change, so we recompute those
+        two stacks exactly (cheap: H is small).
+        """
+        if src == dst:
+            return 0.0
+        src_stack = self.stack(src)
+        dst_stack = self.stack(dst)
+        if not src_stack:
+            raise ValueError("Source stack empty")
+        moved_cid = src_stack[-1]
+        if moved_cid != container_id:
+            # Defensive fallback for callers that pass stale IDs.
+            container_id = moved_cid
+
+        before = self._stack_top_group_mismatch_from_stack(src_stack, self.group) * top_mismatch_weight
+        before += self._stack_expected_rehandles_from_stack(src_stack, self.group) * rehandle_weight
+        before += self._stack_impurity_from_stack(src_stack, self.group) * impurity_weight
+        before += self._stack_buried_foreign_from_stack(src_stack, self.group) * buried_foreign_weight
+        before += self._stack_top_group_mismatch_from_stack(dst_stack, self.group) * top_mismatch_weight
+        before += self._stack_expected_rehandles_from_stack(dst_stack, self.group) * rehandle_weight
+        before += self._stack_impurity_from_stack(dst_stack, self.group) * impurity_weight
+        before += self._stack_buried_foreign_from_stack(dst_stack, self.group) * buried_foreign_weight
+
+        virtual_src = src_stack[:-1]
+        virtual_dst = list(dst_stack)
+        virtual_dst.append(container_id)
+
+        after = self._stack_top_group_mismatch_from_stack(virtual_src, self.group) * top_mismatch_weight
+        after += self._stack_expected_rehandles_from_stack(virtual_src, self.group) * rehandle_weight
+        after += self._stack_impurity_from_stack(virtual_src, self.group) * impurity_weight
+        after += self._stack_buried_foreign_from_stack(virtual_src, self.group) * buried_foreign_weight
+        after += self._stack_top_group_mismatch_from_stack(virtual_dst, self.group) * top_mismatch_weight
+        after += self._stack_expected_rehandles_from_stack(virtual_dst, self.group) * rehandle_weight
+        after += self._stack_impurity_from_stack(virtual_dst, self.group) * impurity_weight
+        after += self._stack_buried_foreign_from_stack(virtual_dst, self.group) * buried_foreign_weight
+
+        return after - before
+
+    def delta_group_fragmentation_for_move(self, container_id: int, src: XY, dst: XY) -> float:
+        """
+        Delta fragmentation for moving `container_id` from src to dst.
+
+        Fragmentation(group) = occupied_stacks(group) - 1 (when occupied > 0).
+        Only moved container's group can change.
+        """
+        if src == dst:
+            return 0.0
+        self._ensure_group_stack_occupancy()
+
+        g = self.group[container_id]
+        occupied_before = self.group_stack_occupancy[g]
+        before_cost = float(occupied_before - 1) if occupied_before > 0 else 0.0
+
+        src_count = self._count_group_in_stack(src, g)
+        dst_count = self._count_group_in_stack(dst, g)
+        occupied_after = occupied_before
+        if src_count == 1:
+            occupied_after -= 1
+        if dst_count == 0:
+            occupied_after += 1
+        after_cost = float(occupied_after - 1) if occupied_after > 0 else 0.0
+        return after_cost - before_cost
+
     # -------------------------
     # Move application
     # -------------------------
@@ -266,6 +512,17 @@ class State:
         self.count_x[g][dx] += 1
         self.count_y[g][dy] += 1
 
+        # Update group-stack occupancy (affects fragmentation objective).
+        self._ensure_group_stack_occupancy()
+        dst_count_after = self._count_group_in_stack(dst, g)
+        src_count_after = self._count_group_in_stack(src, g)
+        # Source had one less g after the pop.
+        if src_count_after == 0:
+            self.group_stack_occupancy[g] -= 1
+        # Destination had no group-g before iff current count is exactly 1 now.
+        if dst_count_after == 1:
+            self.group_stack_occupancy[g] += 1
+
         # Update bounds + spread (small scan; robust)
         self.xmin[g], self.xmax[g] = self._recompute_bounds_1d_from_counts(self.count_x[g])
         self.ymin[g], self.ymax[g] = self._recompute_bounds_1d_from_counts(self.count_y[g])
@@ -294,6 +551,7 @@ class State:
             ymin=list(self.ymin),
             ymax=list(self.ymax),
             spread=list(self.spread),
+            group_stack_occupancy=list(self.group_stack_occupancy),
         )
 
     @classmethod
@@ -319,6 +577,7 @@ class State:
         ymin = [0] * G
         ymax = [0] * G
         spread = [0.0] * G
+        group_stack_occupancy = [0] * G
 
         tmp = cls(X=X, Y=Y, H=H, yard=yard, group=group, pos=pos)
         tmp.count_x = count_x
@@ -327,5 +586,13 @@ class State:
             xmin[g], xmax[g] = tmp._recompute_bounds_1d_from_counts(count_x[g])
             ymin[g], ymax[g] = tmp._recompute_bounds_1d_from_counts(count_y[g])
             spread[g] = tmp._spread_from_bounds(xmin[g], xmax[g], ymin[g], ymax[g])
+        for x in range(X):
+            for y in range(Y):
+                if not yard[x][y]:
+                    continue
+                present = set(group[cid] for cid in yard[x][y])
+                for g in present:
+                    group_stack_occupancy[g] += 1
         tmp.xmin, tmp.xmax, tmp.ymin, tmp.ymax, tmp.spread = xmin, xmax, ymin, ymax, spread
+        tmp.group_stack_occupancy = group_stack_occupancy
         return tmp

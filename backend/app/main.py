@@ -66,7 +66,14 @@ async def patch_algorithm_settings(payload: schemas.AlgorithmSettingsPatch) -> s
 @app.post("/api/simulations/random", response_model=schemas.RandomSimulationResponse)
 async def create_random_simulation(payload: schemas.RandomSimulationRequest) -> dict:
     try:
-        return database.random_configuration(seed=payload.seed, container_count=payload.containerCount)
+        return database.random_configuration(
+            seed=payload.seed,
+            container_count=payload.containerCount,
+            groups=payload.groups,
+            containers_per_group=payload.containersPerGroup,
+            min_containers_per_group=payload.minContainersPerGroup,
+            max_containers_per_group=payload.maxContainersPerGroup,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

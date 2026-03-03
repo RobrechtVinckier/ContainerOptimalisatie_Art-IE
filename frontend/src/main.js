@@ -2,9 +2,10 @@ import "./style.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
-  COLOR_PALETTE,
   YARD_CONFIG,
   cloneStacks,
+  placementScoreWeightsFromAlgorithmSettings,
+  resolveColorHex,
   summarizeStacks,
 } from "./yardModel.js";
 import {
@@ -44,6 +45,14 @@ const NIGHT_CLOCK_BASE_SECONDS = 22 * 3600;
 const NIGHT_DURATION_SECONDS = 8 * 3600;
 const DAY_CLOCK_BASE_SECONDS = 6 * 3600;
 const DAY_DURATION_SECONDS = 16 * 3600;
+const MAX_RANDOM_CONTAINER_COUNT = YARD_CONFIG.width * YARD_CONFIG.length * YARD_CONFIG.height;
+const MAX_RANDOM_MOVABLE_CONTAINER_COUNT = Math.max(1, MAX_RANDOM_CONTAINER_COUNT - 1);
+const DEFAULT_RANDOM_GROUPS = 3;
+const FAST_FORWARD_SPEED_THRESHOLD = 70;
+const FAST_FORWARD_YIELD_MS = 16;
+const FAST_FORWARD_PROJECTION_THROTTLE_MS = 90;
+const RANDOM_REGENERATE_DEBOUNCE_MS = 380;
+const ALGO_SETTINGS_SYNC_DEBOUNCE_MS = 450;
 
 const CONTAINER_MIN_X = -TOTAL_WIDTH_WORLD / 2;
 const LANE_MIN_X = CONTAINER_MIN_X + YARD_WIDTH_WORLD;
@@ -60,7 +69,6 @@ app.innerHTML = `
     </header>
 
     <section class="toolbar reveal-b">
-      <button id="generate-btn" class="btn primary">Generate Random 130</button>
       <button id="solve-btn" class="btn">Solve With Backend Plan</button>
       <button id="pause-btn" class="btn" disabled>Pause</button>
       <label class="speed-box" for="speed-slider">
@@ -82,7 +90,6 @@ app.innerHTML = `
         <span aria-hidden="true">🕒</span>
         <strong id="clock-value">20:00:00</strong>
       </div>
-      <button id="algo-apply-btn" class="btn">Apply Algo Settings</button>
       <div class="status-text" id="status-text">Ready.</div>
     </section>
 
@@ -90,9 +97,7 @@ app.innerHTML = `
       <section class="scene-panel reveal-c">
         <div id="scene-host"></div>
         <div class="scene-legend">
-          <span><i class="swatch red"></i>Red</span>
-          <span><i class="swatch green"></i>Green</span>
-          <span><i class="swatch blue"></i>Blue</span>
+          <div id="legend-colors" class="legend-colors"></div>
           <span class="lane-note">Two-lane road: parking + passing</span>
         </div>
         <section class="runtime-panel">
@@ -130,14 +135,30 @@ app.innerHTML = `
         </div>
 
         <section class="algo-settings">
+          <h3>Random Setup</h3>
+          <div class="algo-grid">
+            <label><span title="Aantal verschillende containergroepen (elke groep krijgt een unieke kleur).">Groups</span><input id="random-groups" type="number" value="${DEFAULT_RANDOM_GROUPS}" /></label>
+            <label><span title="Totaal aantal containers dat in de yard geplaatst wordt voor de nieuwe random setup.">Total Containers</span><input id="random-container-count" type="number" max="${MAX_RANDOM_MOVABLE_CONTAINER_COUNT}" value="${YARD_CONFIG.containerCount}" /></label>
+            <label><span title="Minimum aantal containers dat elke groep minstens moet krijgen.">Min / Group</span><input id="random-min-per-group" type="number" value="20" /></label>
+            <label><span title="Maximum aantal containers dat een groep maximaal mag krijgen.">Max / Group</span><input id="random-max-per-group" type="number" value="60" /></label>
+          </div>
+        </section>
+
+        <section class="algo-settings">
           <h3>Algorithm Settings</h3>
           <div class="algo-grid">
-            <label><span>Lambda</span><input id="algo-lam" type="number" min="0" step="0.1" value="1" /></label>
-            <label><span>Tabu Iterations</span><input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
-            <label><span>Tabu Length</span><input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
-            <label><span>X Radius</span><input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
-            <label><span>Top Groups</span><input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
-            <label><span>Night Budget (s)</span><input id="algo-night-budget" type="number" min="1" step="100" value="28800" /></label>
+            <label><span title="Gewicht van de cluster-verbetering in de move-score. Hoger = sterker clusteren.">Lambda</span><input id="algo-lam" type="number" min="0" step="0.1" value="1" /></label>
+            <label><span title="Aantal zoekiteraties in de tabu-fase. Meer iteraties kunnen betere oplossingen geven.">Tabu Iterations</span><input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
+            <label><span title="Lengte van de tabu-lijst: hoeveel recente moves tijdelijk verboden blijven.">Tabu Length</span><input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
+            <label><span title="Zoekradius op de x-as rond het groepscentrum voor kandidaat-doelstacks.">X Radius</span><input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
+            <label><span title="Aantal groepen met grootste spread dat prioriteit krijgt in de kandidatenzoektocht.">Top Groups</span><input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
+            <label><span title="Maximale beschikbare tijd (in seconden) voor de nachtcyclus van het algoritme.">Night Budget (s)</span><input id="algo-night-budget" type="number" min="1" step="100" value="28800" /></label>
+            <label><span title="Penaltygewicht voor stacks waarvan de topgroep niet overeenkomt met de stackinhoud.">Top Mismatch W</span><input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.1" /></label>
+            <label><span title="Penaltygewicht voor verwachte extra rehandles door gemixte groepen in stacks.">Rehandle W</span><input id="algo-stack-rehandle-weight" type="number" min="0" step="0.1" value="1.0" /></label>
+            <label><span title="Penaltygewicht voor onzuivere stacks (containers buiten de meerderheids-groep).">Impurity W</span><input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="1.4" /></label>
+            <label><span title="Penaltygewicht voor containers die dieper begraven liggen onder andere groepen.">Buried Foreign W</span><input id="algo-buried-foreign-weight" type="number" min="0" step="0.1" value="2.0" /></label>
+            <label><span title="Penaltygewicht voor het spreiden van één groep over veel verschillende stacks.">Fragmentation W</span><input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.9" /></label>
+            <label><span title="Als twee moves qua quality bijna gelijk zijn (binnen deze epsilon), kiest het algoritme de lagere operationele kost.">Quality Tie EPS</span><input id="algo-quality-tie-eps" type="number" min="0" step="0.000001" value="0.000000001" /></label>
           </div>
         </section>
 
@@ -156,7 +177,6 @@ app.innerHTML = `
 
 const refs = {
   sceneHost: document.getElementById("scene-host"),
-  generateBtn: document.getElementById("generate-btn"),
   solveBtn: document.getElementById("solve-btn"),
   pauseBtn: document.getElementById("pause-btn"),
   speedSlider: document.getElementById("speed-slider"),
@@ -165,13 +185,23 @@ const refs = {
   cycleBox: document.getElementById("cycle-box"),
   cycleLabel: document.getElementById("cycle-label"),
   clockValue: document.getElementById("clock-value"),
-  algoApplyBtn: document.getElementById("algo-apply-btn"),
+  randomGroups: document.getElementById("random-groups"),
+  randomContainerCount: document.getElementById("random-container-count"),
+  randomMinPerGroup: document.getElementById("random-min-per-group"),
+  randomMaxPerGroup: document.getElementById("random-max-per-group"),
   algoLam: document.getElementById("algo-lam"),
   algoTabuIters: document.getElementById("algo-tabu-iters"),
   algoTabuLen: document.getElementById("algo-tabu-len"),
   algoXRadius: document.getElementById("algo-x-radius"),
   algoTopGroups: document.getElementById("algo-top-groups"),
   algoNightBudget: document.getElementById("algo-night-budget"),
+  algoStackTopMismatchWeight: document.getElementById("algo-stack-top-mismatch-weight"),
+  algoStackRehandleWeight: document.getElementById("algo-stack-rehandle-weight"),
+  algoStackImpurityWeight: document.getElementById("algo-stack-impurity-weight"),
+  algoBuriedForeignWeight: document.getElementById("algo-buried-foreign-weight"),
+  algoGroupFragmentationWeight: document.getElementById("algo-group-fragmentation-weight"),
+  algoQualityTieEps: document.getElementById("algo-quality-tie-eps"),
+  legendColors: document.getElementById("legend-colors"),
   statusText: document.getElementById("status-text"),
   statTotal: document.getElementById("stat-total"),
   statScore: document.getElementById("stat-score"),
@@ -199,6 +229,7 @@ const state = {
   stacks: null,
   solving: false,
   paused: false,
+  uiBusy: false,
   speed: 1,
   runToken: 0,
   moveCursor: 0,
@@ -216,13 +247,28 @@ const state = {
   nightStats: null,
   dayCyclePlan: null,
   dayStats: null,
+  lastFastForwardYieldAt: 0,
+  lastProjectionDrawAt: 0,
+  randomRegenerateTimer: null,
+  pendingRandomSetup: null,
+  lastRandomSetupSignature: null,
+  algoSyncTimer: null,
+  algoSyncInFlight: false,
+  algoSyncQueued: false,
+  legendSignature: "",
 };
 
-const colorToHex = {
-  red: new THREE.Color(COLOR_PALETTE.red),
-  green: new THREE.Color(COLOR_PALETTE.green),
-  blue: new THREE.Color(COLOR_PALETTE.blue),
-};
+const threeColorCache = new Map();
+
+function colorToThree(colorName) {
+  const resolved = resolveColorHex(colorName);
+  let color = threeColorCache.get(resolved);
+  if (!color) {
+    color = new THREE.Color(resolved);
+    threeColorCache.set(resolved, color);
+  }
+  return color;
+}
 
 const world = initWorld(refs.sceneHost);
 state.cranePose = {
@@ -295,14 +341,84 @@ function updateRuntimeStats() {
   refs.runtimeRemaining.textContent = day ? `${day.remainingContainers}` : "-";
 }
 
+function toNullableInteger(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.floor(parsed);
+}
+
+function getRandomGenerationFormValues() {
+  const parsedContainerCount = toNullableInteger(refs.randomContainerCount.value);
+  if (parsedContainerCount === null) {
+    return null;
+  }
+
+  const containerCount = Math.min(parsedContainerCount, MAX_RANDOM_MOVABLE_CONTAINER_COUNT);
+  const groups = toNullableInteger(refs.randomGroups.value);
+  const minContainersPerGroup = toNullableInteger(refs.randomMinPerGroup.value);
+  const maxContainersPerGroup = toNullableInteger(refs.randomMaxPerGroup.value);
+
+  refs.randomContainerCount.value = String(containerCount);
+
+  const payload = {
+    containerCount,
+  };
+
+  if (groups !== null) {
+    payload.groups = groups;
+  }
+  if (minContainersPerGroup !== null) {
+    payload.minContainersPerGroup = minContainersPerGroup;
+  }
+  if (maxContainersPerGroup !== null) {
+    payload.maxContainersPerGroup = maxContainersPerGroup;
+  }
+
+  return payload;
+}
+
+function randomSetupSignature(setup) {
+  return [
+    setup.containerCount,
+    setup.groups ?? "",
+    setup.minContainersPerGroup ?? "",
+    setup.maxContainersPerGroup ?? "",
+  ].join(":");
+}
+
+function scheduleRandomRegeneration() {
+  const randomSetup = getRandomGenerationFormValues();
+  if (!randomSetup) {
+    return;
+  }
+  const signature = randomSetupSignature(randomSetup);
+  if (signature === state.lastRandomSetupSignature) {
+    return;
+  }
+
+  if (state.randomRegenerateTimer !== null) {
+    window.clearTimeout(state.randomRegenerateTimer);
+  }
+
+  state.randomRegenerateTimer = window.setTimeout(() => {
+    state.randomRegenerateTimer = null;
+    if (state.uiBusy) {
+      state.pendingRandomSetup = randomSetup;
+      return;
+    }
+    if (state.solving) {
+      cancelRun();
+    }
+    void generateScenario(randomSetup);
+  }, RANDOM_REGENERATE_DEBOUNCE_MS);
+}
+
 setCyclePhase("nightSetup");
 setClockPhaseBase(NIGHT_CLOCK_BASE_SECONDS);
 setPhaseClock(0);
 clearRuntimeStats();
-
-refs.generateBtn.addEventListener("click", () => {
-  generateScenario();
-});
 
 refs.solveBtn.addEventListener("click", () => {
   solveScenario();
@@ -323,14 +439,40 @@ refs.speedSlider.addEventListener("input", (event) => {
   refs.speedValue.textContent = `${state.speed.toFixed(2)}x`;
 });
 
+for (const field of [
+  refs.randomGroups,
+  refs.randomContainerCount,
+  refs.randomMinPerGroup,
+  refs.randomMaxPerGroup,
+]) {
+  field.addEventListener("input", () => {
+    scheduleRandomRegeneration();
+  });
+}
+
 refs.passthroughToggle.addEventListener("change", (event) => {
   state.passthrough = event.target.checked;
   applyContainerSelectionStyles();
 });
 
-refs.algoApplyBtn.addEventListener("click", () => {
-  applyAlgorithmSettings();
-});
+for (const field of [
+  refs.algoLam,
+  refs.algoTabuIters,
+  refs.algoTabuLen,
+  refs.algoXRadius,
+  refs.algoTopGroups,
+  refs.algoNightBudget,
+  refs.algoStackTopMismatchWeight,
+  refs.algoStackRehandleWeight,
+  refs.algoStackImpurityWeight,
+  refs.algoBuriedForeignWeight,
+  refs.algoGroupFragmentationWeight,
+  refs.algoQualityTieEps,
+]) {
+  field.addEventListener("input", () => {
+    scheduleAlgorithmSettingsSync();
+  });
+}
 
 for (const eyeButton of refs.eyeButtons) {
   eyeButton.addEventListener("click", () => {
@@ -651,7 +793,7 @@ function createTruckModel({ cabColor, containerColor = null }) {
 }
 
 function createHaulContainer(colorName, width, height, length) {
-  const color = colorToHex[colorName] || new THREE.Color("#60768b");
+  const color = colorToThree(colorName).clone();
   const group = new THREE.Group();
   const shellMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.12 });
   const shadeMat = new THREE.MeshStandardMaterial({
@@ -854,13 +996,13 @@ function createContainerMesh(color) {
   const height = CONTAINER_VISUAL_HEIGHT;
 
   const shellMaterial = new THREE.MeshStandardMaterial({
-    color: colorToHex[color],
+    color: colorToThree(color),
     roughness: 0.56,
     metalness: 0.16,
   });
 
   const shadeMaterial = new THREE.MeshStandardMaterial({
-    color: colorToHex[color].clone().multiplyScalar(0.72),
+    color: colorToThree(color).clone().multiplyScalar(0.72),
     roughness: 0.62,
     metalness: 0.1,
   });
@@ -1067,21 +1209,53 @@ function startRenderLoop() {
   render();
 }
 
+function renderColorLegend(colorCount) {
+  const entries = Object.entries(colorCount || {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  const signature = entries.map(([color, count]) => `${color}:${count}`).join("|");
+  if (signature === state.legendSignature) {
+    return;
+  }
+  state.legendSignature = signature;
+
+  refs.legendColors.textContent = "";
+  for (const [colorName] of entries) {
+    const item = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.className = "swatch";
+    swatch.style.background = resolveColorHex(colorName);
+
+    const label = document.createElement("span");
+    label.textContent = colorName;
+
+    item.appendChild(swatch);
+    item.appendChild(label);
+    refs.legendColors.appendChild(item);
+  }
+}
+
+function currentPlacementScoreWeights() {
+  return placementScoreWeightsFromAlgorithmSettings(state.algorithmSettings);
+}
+
 function updateStats() {
   if (!state.stacks) {
     refs.statTotal.textContent = "0";
     refs.statScore.textContent = "0%";
     refs.statProgress.textContent = "-";
     refs.statCost.textContent = "0";
+    renderColorLegend({});
     return;
   }
 
-  const summary = summarizeStacks(state.stacks);
+  const summary = summarizeStacks(state.stacks, currentPlacementScoreWeights());
   refs.statTotal.textContent = `${summary.total}`;
   refs.statScore.textContent = `${Math.round(summary.placementScore * 100)}%`;
   refs.statProgress.textContent =
     state.moveTotal > 0 ? `${state.moveCursor} / ${state.moveTotal}` : state.solving ? "0 / ?" : "-";
   refs.statCost.textContent = `${state.weightedCost}`;
+  renderColorLegend(summary.colorCount);
 }
 
 function setAlgorithmFormValues(settings) {
@@ -1091,16 +1265,70 @@ function setAlgorithmFormValues(settings) {
   refs.algoXRadius.value = String(settings.xRadius);
   refs.algoTopGroups.value = String(settings.topGroups);
   refs.algoNightBudget.value = String(settings.nightBudget);
+  refs.algoStackTopMismatchWeight.value = String(settings.stackTopMismatchWeight);
+  refs.algoStackRehandleWeight.value = String(settings.stackRehandleWeight);
+  refs.algoStackImpurityWeight.value = String(settings.stackImpurityWeight);
+  refs.algoBuriedForeignWeight.value = String(settings.buriedForeignWeight);
+  refs.algoGroupFragmentationWeight.value = String(settings.groupFragmentationWeight);
+  refs.algoQualityTieEps.value = String(settings.qualityTieEps);
 }
 
 function getAlgorithmFormValues() {
+  const lam = Number(refs.algoLam.value);
+  const tabuIters = Number(refs.algoTabuIters.value);
+  const tabuLen = Number(refs.algoTabuLen.value);
+  const xRadius = Number(refs.algoXRadius.value);
+  const topGroups = Number(refs.algoTopGroups.value);
+  const nightBudget = Number(refs.algoNightBudget.value);
+  const stackTopMismatchWeight = Number(refs.algoStackTopMismatchWeight.value);
+  const stackRehandleWeight = Number(refs.algoStackRehandleWeight.value);
+  const stackImpurityWeight = Number(refs.algoStackImpurityWeight.value);
+  const buriedForeignWeight = Number(refs.algoBuriedForeignWeight.value);
+  const groupFragmentationWeight = Number(refs.algoGroupFragmentationWeight.value);
+  const qualityTieEps = Number(refs.algoQualityTieEps.value);
+
+  if (
+    !Number.isFinite(lam)
+    || lam < 0
+    || !Number.isFinite(tabuIters)
+    || tabuIters < 1
+    || !Number.isFinite(tabuLen)
+    || tabuLen < 1
+    || !Number.isFinite(xRadius)
+    || xRadius < 0
+    || !Number.isFinite(topGroups)
+    || topGroups < 1
+    || !Number.isFinite(nightBudget)
+    || nightBudget < 1
+    || !Number.isFinite(stackTopMismatchWeight)
+    || stackTopMismatchWeight < 0
+    || !Number.isFinite(stackRehandleWeight)
+    || stackRehandleWeight < 0
+    || !Number.isFinite(stackImpurityWeight)
+    || stackImpurityWeight < 0
+    || !Number.isFinite(buriedForeignWeight)
+    || buriedForeignWeight < 0
+    || !Number.isFinite(groupFragmentationWeight)
+    || groupFragmentationWeight < 0
+    || !Number.isFinite(qualityTieEps)
+    || qualityTieEps < 0
+  ) {
+    return null;
+  }
+
   return {
-    lam: Number(refs.algoLam.value),
-    tabuIters: Number(refs.algoTabuIters.value),
-    tabuLen: Number(refs.algoTabuLen.value),
-    xRadius: Number(refs.algoXRadius.value),
-    topGroups: Number(refs.algoTopGroups.value),
-    nightBudget: Number(refs.algoNightBudget.value),
+    lam,
+    tabuIters: Math.floor(tabuIters),
+    tabuLen: Math.floor(tabuLen),
+    xRadius: Math.floor(xRadius),
+    topGroups: Math.floor(topGroups),
+    nightBudget,
+    stackTopMismatchWeight,
+    stackRehandleWeight,
+    stackImpurityWeight,
+    buriedForeignWeight,
+    groupFragmentationWeight,
+    qualityTieEps,
   };
 }
 
@@ -1109,23 +1337,55 @@ async function loadAlgorithmSettings() {
     const settings = await getAlgorithmSettings();
     state.algorithmSettings = settings;
     setAlgorithmFormValues(settings);
+    updateStats();
   } catch (error) {
     refs.statusText.textContent = `Settings load failed: ${error.message}`;
   }
 }
 
 async function applyAlgorithmSettings() {
-  refs.algoApplyBtn.disabled = true;
+  const payload = getAlgorithmFormValues();
+  if (!payload) {
+    refs.statusText.textContent = "Algorithm settings not synced yet: complete all fields with valid values.";
+    return;
+  }
+
+  if (state.algoSyncInFlight) {
+    state.algoSyncQueued = true;
+    return;
+  }
+
+  state.algoSyncInFlight = true;
   try {
-    const settings = await updateAlgorithmSettings(getAlgorithmFormValues());
+    const settings = await updateAlgorithmSettings(payload);
     state.algorithmSettings = settings;
     setAlgorithmFormValues(settings);
+    updateStats();
     refs.statusText.textContent = "Algorithm settings updated on backend.";
   } catch (error) {
     refs.statusText.textContent = `Settings update failed: ${error.message}`;
   } finally {
-    refs.algoApplyBtn.disabled = false;
+    state.algoSyncInFlight = false;
+    if (state.algoSyncQueued) {
+      state.algoSyncQueued = false;
+      void applyAlgorithmSettings();
+    }
   }
+}
+
+function scheduleAlgorithmSettingsSync() {
+  if (state.algoSyncTimer !== null) {
+    window.clearTimeout(state.algoSyncTimer);
+  }
+
+  state.algoSyncTimer = window.setTimeout(() => {
+    state.algoSyncTimer = null;
+    if (state.uiBusy) {
+      state.algoSyncQueued = true;
+      return;
+    }
+    void applyAlgorithmSettings();
+  }, ALGO_SETTINGS_SYNC_DEBOUNCE_MS);
 }
 
 function drawProjection(view, canvas, cols, rows, cellResolver, options = {}) {
@@ -1161,7 +1421,7 @@ function drawProjection(view, canvas, cols, rows, cellResolver, options = {}) {
       const color = cell?.color ?? null;
       const ids = cell?.ids ?? [];
       hitMap.set(`${col},${row}`, ids);
-      ctx.fillStyle = color ? COLOR_PALETTE[color] : "#c8d6e4";
+      ctx.fillStyle = color ? resolveColorHex(color) : "#c8d6e4";
       ctx.fillRect(
         padding + col * cellW + 1,
         padding + row * cellH + 1,
@@ -1214,10 +1474,21 @@ function drawProjection(view, canvas, cols, rows, cellResolver, options = {}) {
   };
 }
 
-function updateProjections() {
+function updateProjections(force = false) {
   if (!state.stacks) {
     return;
   }
+
+  const now = performance.now();
+  if (
+    !force
+    && state.solving
+    && state.speed >= FAST_FORWARD_SPEED_THRESHOLD
+    && now - state.lastProjectionDrawAt < FAST_FORWARD_PROJECTION_THROTTLE_MS
+  ) {
+    return;
+  }
+  state.lastProjectionDrawAt = now;
 
   const stacks = state.stacks;
 
@@ -1416,12 +1687,39 @@ function snapCameraToView(view) {
 }
 
 function setBusyUi(busy) {
-  refs.generateBtn.disabled = busy;
+  state.uiBusy = busy;
   refs.solveBtn.disabled = busy || !state.stacks;
-  refs.algoApplyBtn.disabled = busy;
+  refs.randomGroups.disabled = busy;
+  refs.randomContainerCount.disabled = busy;
+  refs.randomMinPerGroup.disabled = busy;
+  refs.randomMaxPerGroup.disabled = busy;
+
+  if (!busy) {
+    if (state.pendingRandomSetup !== null && !state.solving) {
+      const queuedSetup = state.pendingRandomSetup;
+      state.pendingRandomSetup = null;
+      void generateScenario(queuedSetup);
+      return;
+    }
+    if (state.algoSyncQueued && !state.algoSyncInFlight) {
+      state.algoSyncQueued = false;
+      void applyAlgorithmSettings();
+    }
+  }
 }
 
-async function generateScenario() {
+async function generateScenario(preparedRandomSetup = null) {
+  const randomSetup = preparedRandomSetup || getRandomGenerationFormValues();
+  if (!randomSetup) {
+    refs.statusText.textContent = "Random setup waiting: voer een geldige waarde in voor Total Containers.";
+    return;
+  }
+  const randomSignature = randomSetupSignature(randomSetup);
+  if (state.randomRegenerateTimer !== null) {
+    window.clearTimeout(state.randomRegenerateTimer);
+    state.randomRegenerateTimer = null;
+  }
+
   const token = ++state.runToken;
   state.solving = false;
   state.paused = false;
@@ -1448,7 +1746,7 @@ async function generateScenario() {
 
   let response;
   try {
-    response = await requestRandomConfiguration();
+    response = await requestRandomConfiguration(randomSetup);
   } catch (error) {
     refs.statusText.textContent = `Random request failed: ${error.message}`;
     setBusyUi(false);
@@ -1471,6 +1769,7 @@ async function generateScenario() {
   updateProjections();
   updateStats();
 
+  state.lastRandomSetupSignature = randomSignature;
   refs.statusText.textContent = `Random yard generated (${response.summary.total} containers).`;
   setBusyUi(false);
 }
@@ -1485,15 +1784,42 @@ function cancelRun() {
 }
 
 function tween(durationMs, onFrame, token) {
-  if (state.speed >= 80) {
+  if (state.speed >= FAST_FORWARD_SPEED_THRESHOLD) {
     if (token !== state.runToken) {
       return Promise.resolve(false);
     }
+    if (state.paused) {
+      return new Promise((resolve) => {
+        const waitForResume = () => {
+          if (token !== state.runToken) {
+            resolve(false);
+            return;
+          }
+          if (!state.paused) {
+            onFrame(1);
+            resolve(true);
+            return;
+          }
+          requestAnimationFrame(waitForResume);
+        };
+        requestAnimationFrame(waitForResume);
+      });
+    }
     onFrame(1);
-    return Promise.resolve(true);
+    const now = performance.now();
+    if (now - state.lastFastForwardYieldAt < FAST_FORWARD_YIELD_MS) {
+      return Promise.resolve(true);
+    }
+    state.lastFastForwardYieldAt = now;
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        resolve(token === state.runToken);
+      });
+    });
   }
 
   return new Promise((resolve) => {
+    const safeDurationMs = Math.max(1, Number(durationMs) || 1);
     let lastTime = null;
     let progress = 0;
 
@@ -1511,7 +1837,7 @@ function tween(durationMs, onFrame, token) {
       lastTime = timestamp;
 
       if (!state.paused) {
-        progress += (delta * state.speed) / durationMs;
+        progress += (delta * state.speed) / safeDurationMs;
         const t = Math.min(1, progress);
         onFrame(t);
       }
@@ -1899,6 +2225,11 @@ async function solveScenario() {
   if (!state.stacks || state.solving) {
     return;
   }
+  const algorithmFormValues = getAlgorithmFormValues();
+  if (!algorithmFormValues) {
+    refs.statusText.textContent = "Cannot solve: complete all algorithm settings with valid values first.";
+    return;
+  }
 
   const token = ++state.runToken;
   state.solving = true;
@@ -1913,19 +2244,17 @@ async function solveScenario() {
 
   refs.pauseBtn.disabled = false;
   refs.pauseBtn.textContent = "Pause";
-  refs.generateBtn.disabled = true;
   refs.solveBtn.disabled = true;
   refs.statusText.textContent = "Requesting solve plan from backend...";
   updateStats();
 
   let plan;
   try {
-    plan = await requestSolvePlan(cloneStacks(state.stacks), getAlgorithmFormValues());
+    plan = await requestSolvePlan(cloneStacks(state.stacks), algorithmFormValues);
   } catch (error) {
     state.solving = false;
     refs.pauseBtn.disabled = true;
     refs.pauseBtn.textContent = "Pause";
-    refs.generateBtn.disabled = false;
     refs.solveBtn.disabled = false;
     setCyclePhase("nightSetup");
     refs.statusText.textContent = `Solve request failed: ${error.message}`;
@@ -1989,15 +2318,14 @@ async function solveScenario() {
   state.paused = false;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
-  refs.generateBtn.disabled = false;
   refs.solveBtn.disabled = true;
   setCyclePhase("completed");
 
   const remaining = state.dayStats?.remainingContainers ?? 0;
   refs.statusText.textContent =
     remaining === 0
-      ? `Day finished at 22:00. All scheduled offloads completed. Generate a new random night setup for the next cycle.`
-      : `Day finished at 22:00 with ${remaining} container${remaining === 1 ? "" : "s"} still in yard. Generate a new random night setup to continue.`;
+      ? `Day finished at 22:00. All scheduled offloads completed. Pas random setup velden aan voor de volgende cyclus.`
+      : `Day finished at 22:00 with ${remaining} container${remaining === 1 ? "" : "s"} still in yard. Pas random setup velden aan om door te gaan.`;
 
   updateProjections();
   updateStats();

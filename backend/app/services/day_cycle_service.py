@@ -66,6 +66,31 @@ def top_containers(stacks: List[List[List[dict]]]) -> List[Tuple[int, int, int, 
     return out
 
 
+def _pick_active_group_color(
+    candidates: List[Tuple[int, int, int, dict]],
+    remaining_by_color: Dict[str, int],
+) -> str | None:
+    """Pick next group color batch deterministically from accessible tops."""
+    accessible_by_color: Dict[str, int] = {}
+    for _x, _z, _y, container in candidates:
+        color_name = container["color"]
+        if remaining_by_color.get(color_name, 0) <= 0:
+            continue
+        accessible_by_color[color_name] = accessible_by_color.get(color_name, 0) + 1
+
+    if not accessible_by_color:
+        return None
+
+    return min(
+        accessible_by_color.keys(),
+        key=lambda color_name: (
+            -remaining_by_color.get(color_name, 0),
+            -accessible_by_color[color_name],
+            color_name,
+        ),
+    )
+
+
 def estimate_truck_timing(
     *,
     load_start: float,
@@ -110,15 +135,30 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
     total_crane_weighted_cost = 0.0
     total_lane_wait_seconds = 0.0
     jobs: List[dict] = []
+    active_group_color: str | None = None
 
     while True:
         candidates = top_containers(working)
         if not candidates:
             break
 
+        if active_group_color is None or remaining_by_color.get(active_group_color, 0) <= 0:
+            active_group_color = _pick_active_group_color(candidates, remaining_by_color)
+            if active_group_color is None:
+                break
+
+        group_candidates = [
+            (source_x, source_z, source_y, container)
+            for source_x, source_z, source_y, container in candidates
+            if container["color"] == active_group_color
+        ]
+        if not group_candidates:
+            # Strict batch policy: do not mix groups while the active group still has containers.
+            break
+
         best_choice = None
         best_score = None
-        for source_x, source_z, source_y, container in candidates:
+        for source_x, source_z, source_y, container in group_candidates:
             for slot_index in range(DAY_TRUCK_SLOTS):
                 slot_z = slot_z_map[slot_index]
                 horizontal_weighted_cost = weighted_xy_cost(crane_x, crane_z, source_x, source_z) + weighted_xy_cost(
@@ -218,6 +258,8 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
             company_trips[company] = 0
         company_trips[company] += 1
         remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) - 1
+        if remaining_by_color[color_name] <= 0:
+            active_group_color = None
 
         lane_flow_free_at = arrival_time + TRUCK_FLOW_HEADWAY_SECONDS
         lane_flow_free_at = depart_time + TRUCK_FLOW_HEADWAY_SECONDS

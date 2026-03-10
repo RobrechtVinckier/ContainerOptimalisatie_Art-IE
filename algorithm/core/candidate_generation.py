@@ -50,6 +50,15 @@ def _move_energy_cost(state: State, src: XY, dst: XY, cfg: OptimizerConfig) -> f
     return cfg.energy_x_cost * ex + cfg.energy_y_cost * ey + cfg.energy_z_cost * ez
 
 
+def _dominant_expensive_axis(cfg: OptimizerConfig) -> int:
+    """Return axis index of the dominant horizontal energy cost: 0=x, 1=y."""
+    return 0 if cfg.energy_x_cost >= cfg.energy_y_cost else 1
+
+
+def _axis_delta(a: XY, b: XY, axis: int) -> int:
+    return abs(a[axis] - b[axis])
+
+
 def _destination_group_preference(state: State, group_index: int, dst: XY) -> int:
     """
     Hard preference for destination stack type:
@@ -81,12 +90,14 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
     if g_count <= 0:
         return []
 
+    expensive_axis = _dominant_expensive_axis(cfg)
+
     # pick largest-spread groups (deterministic tie-break by group id)
     group_order = sorted(range(g_count), key=lambda g: (-state.group_spread(g), g))
     focus_groups = set(group_order[: min(cfg.top_groups, g_count)])
 
     # enumerate source stacks with top container in focus group
-    src_records: List[Tuple[Tuple[float, float, float, int, int], XY]] = []
+    src_records: List[Tuple[Tuple[float, ...], XY]] = []
     for x in range(state.X):
         for y in range(state.Y):
             top = state.top((x, y))
@@ -104,7 +115,13 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             dist_from_center = 2.0 * abs(x - center_x) + 0.5 * abs(y - center_y)
             impurity = state.stack_impurity_penalty((x, y))
             buried = state.stack_buried_foreign_penalty((x, y))
+            crane_axis_delta = _axis_delta(state.crane_pos, (x, y), expensive_axis)
+            if cfg.max_expensive_axis_src_delta > 0 and crane_axis_delta > cfg.max_expensive_axis_src_delta:
+                continue
+            crane_reposition = travel_time(state.crane_pos, (x, y))
             priority = (
+                crane_axis_delta,
+                crane_reposition,
                 0.0 if on_boundary else 1.0,
                 -state.group_spread(group_index),
                 -buried,
@@ -151,9 +168,19 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
         if not local_dsts:
             # robust fallback: keep search alive even when local radius is saturated
             local_dsts = [xy for xy in free if xy != src]
+        if cfg.max_expensive_axis_move_delta > 0:
+            local_dsts = [
+                xy
+                for xy in local_dsts
+                if _axis_delta(src, xy, expensive_axis) <= cfg.max_expensive_axis_move_delta
+            ]
+        if not local_dsts:
+            continue
         local_dsts.sort(
             key=lambda dst: (
                 _destination_group_preference(state, group_index, dst),
+                _axis_delta(src, dst, expensive_axis),
+                state.move_time(src, dst) + cfg.energy_weight * _move_energy_cost(state, src, dst, cfg),
                 2.0 * abs(dst[0] - center_x) + 0.5 * abs(dst[1] - center_y),
                 state.stack_compatibility_penalty_for_group(group_index, dst),
                 state.delta_stack_quality_for_move(

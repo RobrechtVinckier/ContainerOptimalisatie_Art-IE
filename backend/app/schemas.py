@@ -49,6 +49,7 @@ class AlgorithmSettings(BaseModel):
     groupFragmentationWeight: float = 0.9
     qualityTieEps: float = 1e-9
     operationalWeight: float = 1.0
+    operationalNormalizer: float = 60.0
     nightBudget: float = 28800.0
     energyWeight: float = 1.0
     energyXCost: float = 10.0
@@ -60,6 +61,8 @@ class AlgorithmSettings(BaseModel):
     xRadius: int = 2
     yRadius: int = 1
     yAware: bool = True
+    maxExpensiveAxisSrcDelta: int = 4
+    maxExpensiveAxisMoveDelta: int = 3
     diversifyPeriod: int = 0
     diversifyRandomDsts: int = 0
     tabuIters: int = 1500
@@ -98,6 +101,7 @@ class AlgorithmSettingsPatch(BaseModel):
     groupFragmentationWeight: Optional[float] = None
     qualityTieEps: Optional[float] = None
     operationalWeight: Optional[float] = None
+    operationalNormalizer: Optional[float] = None
     nightBudget: Optional[float] = None
     energyWeight: Optional[float] = None
     energyXCost: Optional[float] = None
@@ -109,6 +113,8 @@ class AlgorithmSettingsPatch(BaseModel):
     xRadius: Optional[int] = None
     yRadius: Optional[int] = None
     yAware: Optional[bool] = None
+    maxExpensiveAxisSrcDelta: Optional[int] = None
+    maxExpensiveAxisMoveDelta: Optional[int] = None
     diversifyPeriod: Optional[int] = None
     diversifyRandomDsts: Optional[int] = None
     tabuIters: Optional[int] = None

@@ -74,6 +74,7 @@ def main() -> None:
     p.add_argument("--group-fragmentation-weight", type=float, default=0.0)
     p.add_argument("--quality-tie-eps", type=float, default=1e-9)
     p.add_argument("--operational-weight", type=float, default=1.0)
+    p.add_argument("--operational-normalizer", type=float, default=60.0)
     p.add_argument("--energy-weight", type=float, default=1.0)
     p.add_argument("--energy-x-cost", type=float, default=10.0)
     p.add_argument("--energy-y-cost", type=float, default=1.0)
@@ -86,6 +87,8 @@ def main() -> None:
     p.add_argument("--x-radius", type=int, default=2)
     p.add_argument("--y-radius", type=int, default=1)
     p.add_argument("--y-aware", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--max-expensive-axis-src-delta", type=int, default=4)
+    p.add_argument("--max-expensive-axis-move-delta", type=int, default=3)
     p.add_argument("--diversify-period", type=int, default=0)
     p.add_argument("--diversify-random-dsts", type=int, default=0)
 
@@ -130,6 +133,7 @@ def main() -> None:
         group_fragmentation_weight=args.group_fragmentation_weight,
         quality_tie_eps=args.quality_tie_eps,
         operational_weight=args.operational_weight,
+        operational_normalizer=args.operational_normalizer,
         energy_weight=args.energy_weight,
         energy_x_cost=args.energy_x_cost,
         energy_y_cost=args.energy_y_cost,
@@ -140,6 +144,8 @@ def main() -> None:
         x_radius=args.x_radius,
         y_radius=args.y_radius,
         y_aware=args.y_aware,
+        max_expensive_axis_src_delta=args.max_expensive_axis_src_delta,
+        max_expensive_axis_move_delta=args.max_expensive_axis_move_delta,
         diversify_period=args.diversify_period,
         diversify_random_dsts=args.diversify_random_dsts,
         tabu_iters=args.tabu_iters,

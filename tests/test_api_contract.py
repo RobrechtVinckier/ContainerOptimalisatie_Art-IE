@@ -98,6 +98,35 @@ class TestApiContract(unittest.TestCase):
         self.assertGreaterEqual(stats["totalJobs"], 0)
         self.assertLessEqual(stats["totalJobs"], random_payload["summary"]["total"])
 
+    def test_day_cycle_jobs_are_group_batched(self) -> None:
+        random_payload = self._run(
+            main.create_random_simulation(
+                schemas.RandomSimulationRequest(seed=2024, containerCount=24)
+            )
+        )
+        solve_payload = self._run(
+            main.solve_simulation(
+                schemas.SolveSimulationRequest(
+                    stacks=random_payload["stacks"],
+                    settings=schemas.AlgorithmSettingsPatch(seed=2024, tabuIters=80),
+                )
+            )
+        )
+
+        jobs = solve_payload["dayCycle"]["jobs"]
+        seen_colors = set()
+        last_color = None
+        for job in jobs:
+            color_name = job["containerColor"]
+            if color_name != last_color:
+                self.assertNotIn(
+                    color_name,
+                    seen_colors,
+                    f"Color {color_name!r} reappeared after switching groups",
+                )
+                seen_colors.add(color_name)
+                last_color = color_name
+
     def test_random_endpoint_accepts_random_setup_parameters(self) -> None:
         payload = self._run(
             main.create_random_simulation(

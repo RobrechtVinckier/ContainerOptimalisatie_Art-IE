@@ -64,6 +64,9 @@ def night_stage_for_day(
             for dst_x in (YARD_WIDTH - 1, YARD_WIDTH - 2):
                 if dst_x <= src_x:
                     continue
+                # Keep staging local: avoid wide jumps across the whole yard width.
+                if (dst_x - src_x) > 1:
+                    continue
                 dst_z = find_open_z(dst_x, target_z)
                 if dst_z is None:
                     continue
@@ -82,18 +85,21 @@ def night_stage_for_day(
                 if time_used + duration_seconds > night_budget_s:
                     continue
 
+                weighted_cost = weighted_xy_cost(src_x, src_z, dst_x, dst_z)
                 width_gain = float(dst_x - src_x) * CONTAINER_METERS["width"]
                 target_alignment_gain = max(0, abs(src_z - target_z) - abs(dst_z - target_z)) * CONTAINER_METERS[
                     "length"
                 ]
                 length_penalty = abs(dst_z - src_z) * CONTAINER_METERS["length"] * 0.05
                 stack_penalty = dst_y * 0.12
+                weighted_cost_penalty = weighted_cost * 0.08
                 jitter = rng.random() * 0.0005
                 move_score = (
-                    width_gain * 1.6
+                    width_gain * 0.9
                     + target_alignment_gain * 0.5
                     - length_penalty
                     - stack_penalty
+                    - weighted_cost_penalty
                     + jitter
                 ) / max(duration_seconds, 0.01)
 
@@ -110,7 +116,7 @@ def night_stage_for_day(
                         duration_seconds,
                     )
 
-        if best_candidate is None:
+        if best_candidate is None or (best_score is not None and best_score <= 0.0):
             break
 
         (

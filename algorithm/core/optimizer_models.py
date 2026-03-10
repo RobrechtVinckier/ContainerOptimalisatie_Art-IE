@@ -49,6 +49,8 @@ class OptimizerConfig:
     # secondary operational comparator for near-equal quality
     quality_tie_eps: float = 1e-9
     operational_weight: float = 1.0
+    # scale operational score before combining with quality in primary ranking
+    operational_normalizer: float = 60.0
     energy_weight: float = 1.0
     energy_x_cost: float = 10.0
     energy_y_cost: float = 1.0
@@ -61,6 +63,9 @@ class OptimizerConfig:
     x_radius: int = 2
     y_radius: int = 1
     y_aware: bool = True
+    # soft move caps on the dominant expensive axis (<=0 disables)
+    max_expensive_axis_src_delta: int = 4
+    max_expensive_axis_move_delta: int = 3
     diversify_period: int = 0
     diversify_random_dsts: int = 0
 

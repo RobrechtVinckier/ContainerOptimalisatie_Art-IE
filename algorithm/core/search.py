@@ -68,6 +68,16 @@ def _candidate_operational(candidate: Candidate, cfg: OptimizerConfig) -> float:
     return cfg.operational_weight * (candidate.delta_time + cfg.energy_weight * candidate.delta_energy)
 
 
+def _effective_quality(quality: float, operational: float, cfg: OptimizerConfig) -> float:
+    """Blend quality and operational cost on a comparable scale."""
+    normalizer = max(1e-9, cfg.operational_normalizer)
+    return quality + (operational / normalizer)
+
+
+def _candidate_effective_quality(candidate: Candidate, cfg: OptimizerConfig) -> float:
+    return _effective_quality(_candidate_quality(candidate, cfg), _candidate_operational(candidate, cfg), cfg)
+
+
 def _candidate_structural(candidate: Candidate, cfg: OptimizerConfig) -> float:
     """Stack-structure-specific part of quality (group purity / burial / fragmentation)."""
     return (
@@ -80,10 +90,14 @@ def _candidate_structural(candidate: Candidate, cfg: OptimizerConfig) -> float:
 
 
 def _compare_candidate_lexicographic(a: Candidate, b: Candidate, cfg: OptimizerConfig) -> int:
-    """Compare two candidates by quality first, then operational cost."""
+    """Compare candidates by blended efficiency, then detailed tie-breakers."""
     qa = _candidate_quality(a, cfg)
     qb = _candidate_quality(b, cfg)
+    ea = _effective_quality(qa, _candidate_operational(a, cfg), cfg)
+    eb = _effective_quality(qb, _candidate_operational(b, cfg), cfg)
     eps = max(0.0, cfg.quality_tie_eps)
+    if abs(ea - eb) > eps:
+        return -1 if ea < eb else 1
     if abs(qa - qb) > eps:
         return -1 if qa < qb else 1
 
@@ -117,7 +131,11 @@ def _compare_candidate_lexicographic(a: Candidate, b: Candidate, cfg: OptimizerC
 def _compare_ranked_lexicographic(a: _RankedCandidate, b: _RankedCandidate, cfg: OptimizerConfig) -> int:
     qa = a.quality_score
     qb = b.quality_score
+    ea = _effective_quality(qa, a.operational_score, cfg)
+    eb = _effective_quality(qb, b.operational_score, cfg)
     eps = max(0.0, cfg.quality_tie_eps)
+    if abs(ea - eb) > eps:
+        return -1 if ea < eb else 1
     if abs(qa - qb) > eps:
         return -1 if qa < qb else 1
 
@@ -189,8 +207,8 @@ def greedy_plan(state: State, cfg: OptimizerConfig) -> List[Move]:
         feasible.sort(key=cmp_to_key(lambda a, b: _compare_candidate_lexicographic(a, b, cfg)))
         best = feasible[0]
 
-        # No useful move for the configured objective.
-        if _candidate_quality(best, cfg) >= 0.0:
+        # No useful move for configured quality + operational efficiency.
+        if _candidate_effective_quality(best, cfg) >= 0.0:
             break
 
         t0 = state.time_used
@@ -203,7 +221,8 @@ def greedy_plan(state: State, cfg: OptimizerConfig) -> List[Move]:
 
 def _tabu_score(candidate: Candidate, cfg: OptimizerConfig, extra_penalty: float = 0.0) -> float:
     quality = _candidate_quality(candidate, cfg) + extra_penalty
-    if quality >= 0.0:
+    effective = _effective_quality(quality, _candidate_operational(candidate, cfg), cfg)
+    if effective >= 0.0:
         quality += cfg.non_improving_penalty
     return quality
 
@@ -363,7 +382,9 @@ def _rank_candidates(
         if state.time_used + candidate.delta_time > cfg.night_budget_s:
             continue
         quality_delta = _candidate_quality(candidate, cfg)
-        if not allow_non_improving and quality_delta >= 0.0:
+        operational = _candidate_operational(candidate, cfg)
+        effective_quality = _effective_quality(quality_delta, operational, cfg)
+        if not allow_non_improving and effective_quality >= 0.0:
             continue
 
         frequency_penalty = 0.0
@@ -388,7 +409,6 @@ def _rank_candidates(
         if not ignore_tabu and is_tabu and not (cur_objective + quality_delta < best_objective):
             continue
 
-        operational = _candidate_operational(candidate, cfg)
         quality_score = _tabu_score(candidate, cfg, extra_penalty=frequency_penalty)
         ranked.append(
             _RankedCandidate(
@@ -685,7 +705,7 @@ def tabu_improve(state: State, cfg: OptimizerConfig, metrics: Optional[TabuMetri
             reverse_flag = 1
         last_edge = edge
 
-        quality_delta = _candidate_quality(chosen, cfg)
+        quality_delta = _candidate_effective_quality(chosen, cfg)
         if quality_delta < 0.0:
             plateau_count = 0
             improving_window.append(1)

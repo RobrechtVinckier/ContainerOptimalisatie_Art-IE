@@ -1,21 +1,21 @@
 {
   "algorithm_cli_signature_seed_1": {
     "firstMoveLines": [
-      "  t=    7.50->   10.00  cid=   5  (1, 0)->(0, 0)",
-      "  t=   10.00->   14.50  cid=   6  (0, 1)->(2, 1)",
-      "  t=   14.50->   19.50  cid=   3  (2, 0)->(0, 1)"
+      "  t=    8.00->   10.50  cid=   5  (1, 0)->(0, 0)",
+      "  t=   10.50->   15.00  cid=   6  (0, 1)->(2, 1)",
+      "  t=   15.00->   19.50  cid=   3  (2, 0)->(0, 0)"
     ],
     "greedyBudgetSeconds": 28800.0,
     "greedyClusterEnd": 15.0,
     "greedyClusterStart": 17.5,
     "greedyMoves": 2,
-    "greedyTimeUsedSeconds": 7.5,
+    "greedyTimeUsedSeconds": 8.0,
     "initialClusterCost": 17.5,
-    "tabuBestTimeUsedSeconds": 47.0,
+    "tabuBestTimeUsedSeconds": 19.5,
     "tabuBudgetSeconds": 28800.0,
-    "tabuClusterEnd": 3.0,
+    "tabuClusterEnd": 7.0,
     "tabuClusterStart": 17.5,
-    "tabuMovesApplied": 8,
+    "tabuMovesApplied": 3,
     "truncatedMoveCount": 0
   },
   "random_configuration_seed_2025_count_18": {
@@ -149,10 +149,10 @@
       "dayEndSeconds": 79200,
       "dayStartSeconds": 21600,
       "lengthCostWeight": 10,
-      "makespanSeconds": 1373.711667,
+      "makespanSeconds": 1376.33,
       "remainingContainers": 0,
-      "score": 23.108439,
-      "totalCraneWeightedCost": 157.0,
+      "score": 21.129766,
+      "totalCraneWeightedCost": 197.0,
       "totalJobs": 18,
       "totalLaneWaitSeconds": 0.0,
       "trucksUsed": 18
@@ -163,8 +163,8 @@
         "green": 4,
         "red": 9
       },
-      "inTargetSlot": 18,
-      "placementScore": 0.9947154471544716,
+      "inTargetSlot": 14,
+      "placementScore": 0.781786359530262,
       "total": 18
     },
     "final_heights": [
@@ -217,13 +217,13 @@
         0
       ],
       [
-        0,
+        2,
         4,
+        0,
+        2,
+        0,
         1,
         4,
-        1,
-        0,
-        3,
         2,
         3,
         0
@@ -282,145 +282,145 @@
         "weightedCost": 11
       },
       {
-        "durationSeconds": 84.126667,
+        "durationSeconds": 58.526667,
         "from": {
           "x": 4,
           "y": 0,
           "z": 3
         },
         "id": "C0018",
-        "tEnd": 285.78,
+        "tEnd": 260.18,
         "tStart": 201.653333,
         "to": {
-          "x": 2,
+          "x": 3,
           "y": 0,
-          "z": 5
+          "z": 3
         },
-        "weightedCost": 22
+        "weightedCost": 1
       },
       {
-        "durationSeconds": 62.418333,
+        "durationSeconds": 88.018333,
         "from": {
           "x": 2,
           "y": 0,
-          "z": 6
+          "z": 3
         },
-        "id": "C0010",
+        "id": "C0013",
         "tEnd": 348.198333,
-        "tStart": 285.78,
+        "tStart": 260.18,
         "to": {
           "x": 1,
           "y": 1,
           "z": 6
         },
-        "weightedCost": 1
+        "weightedCost": 31
       },
       {
-        "durationSeconds": 45.59,
-        "from": {
-          "x": 3,
-          "y": 0,
-          "z": 8
-        },
-        "id": "C0014",
-        "tEnd": 5205.891667,
-        "tStart": 5160.301667,
-        "to": {
-          "x": 4,
-          "y": 2,
-          "z": 8
-        },
-        "weightedCost": 1.0
-      },
-      {
-        "durationSeconds": 108.506667,
-        "from": {
-          "x": 2,
-          "y": 0,
-          "z": 4
-        },
-        "id": "C0013",
-        "tEnd": 5314.398333,
-        "tStart": 5205.891667,
-        "to": {
-          "x": 4,
-          "y": 0,
-          "z": 4
-        },
-        "weightedCost": 2.0
-      },
-      {
-        "durationSeconds": 73.156667,
+        "durationSeconds": 56.328333,
         "from": {
           "x": 1,
           "y": 0,
           "z": 3
         },
-        "id": "C0008",
-        "tEnd": 5387.555,
-        "tStart": 5314.398333,
+        "id": "C0001",
+        "tEnd": 6524.673333,
+        "tStart": 6468.345,
         "to": {
-          "x": 3,
-          "y": 0,
+          "x": 4,
+          "y": 1,
           "z": 3
         },
-        "weightedCost": 2.0
+        "weightedCost": 3.0
       },
       {
-        "durationSeconds": 62.891667,
+        "durationSeconds": 63.133333,
         "from": {
-          "x": 3,
-          "y": 0,
+          "x": 1,
+          "y": 1,
           "z": 1
         },
-        "id": "C0012",
-        "tEnd": 5450.446667,
-        "tStart": 5387.555,
+        "id": "C0013",
+        "tEnd": 6587.806667,
+        "tStart": 6524.673333,
         "to": {
           "x": 4,
           "y": 3,
           "z": 1
         },
-        "weightedCost": 1.0
+        "weightedCost": 3.0
       },
       {
-        "durationSeconds": 93.876667,
+        "durationSeconds": 60.966667,
+        "from": {
+          "x": 1,
+          "y": 0,
+          "z": 1
+        },
+        "id": "C0010",
+        "tEnd": 6648.773333,
+        "tStart": 6587.806667,
+        "to": {
+          "x": 3,
+          "y": 0,
+          "z": 1
+        },
+        "weightedCost": 2.0
+      },
+      {
+        "durationSeconds": 129.226667,
         "from": {
           "x": 3,
           "y": 0,
-          "z": 3
+          "z": 6
         },
-        "id": "C0008",
-        "tEnd": 5544.323333,
-        "tStart": 5450.446667,
+        "id": "C0005",
+        "tEnd": 6778.0,
+        "tStart": 6648.773333,
         "to": {
           "x": 4,
           "y": 0,
-          "z": 2
+          "z": 5
+        },
+        "weightedCost": 11.0
+      },
+      {
+        "durationSeconds": 112.398333,
+        "from": {
+          "x": 3,
+          "y": 0,
+          "z": 1
+        },
+        "id": "C0010",
+        "tEnd": 6890.398333,
+        "tStart": 6778.0,
+        "to": {
+          "x": 4,
+          "y": 1,
+          "z": 0
         },
         "weightedCost": 11.0
       }
     ],
-    "moves_len": 75,
+    "moves_len": 87,
     "nightStats": {
       "budgetSeconds": 28800.0,
-      "dayPrepMoveCount": 17,
-      "endPlacementScore": 0.994715,
+      "dayPrepMoveCount": 16,
+      "endPlacementScore": 0.781786,
       "greedyMoveCount": 0,
       "lengthCostWeight": 10,
       "startPlacementScore": 0.718293,
-      "tabuImmediateReversals": 419,
-      "tabuMoveCount": 58,
+      "tabuImmediateReversals": 316,
+      "tabuMoveCount": 71,
       "tabuRelinkSteps": 0,
-      "tabuRepeatedEdges": 1161,
+      "tabuRepeatedEdges": 1170,
       "tabuRestarts": 0,
       "tabuSearchMoveCount": 1500,
       "tabuStopReason": "iters_exhausted",
       "tabuUniqueContainersMoved": 15,
-      "timeUsedSeconds": 5544.323333,
-      "totalMoves": 75
+      "timeUsedSeconds": 6890.398333,
+      "totalMoves": 87
     },
     "solved": false,
-    "totalWeightedCost": 1099.0
+    "totalWeightedCost": 1589.0
   }
 }

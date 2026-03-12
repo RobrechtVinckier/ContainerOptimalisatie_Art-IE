@@ -19,6 +19,7 @@ const DAY_CRANE_PHASES = Object.freeze({
 const DEFAULTS = Object.freeze({
   fixedStepSeconds: 0.25,
   maxFixedStepsPerFrame: 600,
+  maxSimAdvanceSeconds: 120,
   entryProgressDistance: 2.8,
   approachBuffer: 3.1,
   nominalRoadSpeed: 5.8,
@@ -579,6 +580,7 @@ export function createDayRuntime(dayCycle, config = {}) {
   const road = {
     fixedStepSeconds: Number(config.fixedStepSeconds) || DEFAULTS.fixedStepSeconds,
     maxFixedStepsPerFrame: Number(config.maxFixedStepsPerFrame) || DEFAULTS.maxFixedStepsPerFrame,
+    maxSimAdvanceSeconds: Number(config.maxSimAdvanceSeconds) || DEFAULTS.maxSimAdvanceSeconds,
     entryProgressDistance: Number(config.entryProgressDistance) || DEFAULTS.entryProgressDistance,
     approachBuffer: Number(config.approachBuffer) || DEFAULTS.approachBuffer,
     nominalRoadSpeed: Number(config.nominalRoadSpeed) || DEFAULTS.nominalRoadSpeed,
@@ -638,15 +640,17 @@ export function advanceDayRuntime(runtime, targetTime, hooks = {}) {
   }
 
   const safeTarget = Math.max(runtime.lastSimTime, Number(targetTime) || 0);
+  const maxAdvanceSeconds = Math.max(
+    runtime.road.fixedStepSeconds,
+    Number(runtime.road.maxSimAdvanceSeconds) || runtime.road.fixedStepSeconds,
+  );
+  const cappedTarget = Math.min(safeTarget, runtime.lastSimTime + maxAdvanceSeconds);
   let cursor = runtime.lastSimTime;
-  const backlog = safeTarget - runtime.lastSimTime;
-  const dynamicStep = backlog <= runtime.road.fixedStepSeconds * runtime.road.maxFixedStepsPerFrame
-    ? runtime.road.fixedStepSeconds
-    : backlog / runtime.road.maxFixedStepsPerFrame;
+  const stepSeconds = Math.max(0.02, runtime.road.fixedStepSeconds);
   let steps = 0;
 
-  while (cursor + 1e-6 < safeTarget && steps < runtime.road.maxFixedStepsPerFrame) {
-    const nextTime = Math.min(safeTarget, cursor + dynamicStep);
+  while (cursor + 1e-6 < cappedTarget && steps < runtime.road.maxFixedStepsPerFrame) {
+    const nextTime = Math.min(cappedTarget, cursor + stepSeconds);
     const dt = nextTime - cursor;
     runtime.currentSimTime = nextTime;
     spawnReadyTrucks(runtime, nextTime, hooks);
@@ -659,8 +663,8 @@ export function advanceDayRuntime(runtime, targetTime, hooks = {}) {
     steps += 1;
   }
 
-  runtime.currentSimTime = safeTarget;
-  runtime.lastSimTime = safeTarget;
+  runtime.currentSimTime = cursor;
+  runtime.lastSimTime = cursor;
 }
 
 export function dayRuntimeHasActiveActors(runtime) {

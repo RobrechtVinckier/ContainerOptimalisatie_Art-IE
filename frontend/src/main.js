@@ -47,6 +47,9 @@ const FAST_FORWARD_SPEED_THRESHOLD = 70;
 const FAST_FORWARD_PROJECTION_THROTTLE_MS = 90;
 const RANDOM_REGENERATE_DEBOUNCE_MS = 380;
 const ALGO_SETTINGS_SYNC_DEBOUNCE_MS = 450;
+const MAX_SIM_SECONDS_PER_FRAME = 120;
+const DAY_RUNTIME_STEP_SECONDS = 0.2;
+const DAY_RUNTIME_MAX_STEPS_PER_FRAME = Math.ceil(MAX_SIM_SECONDS_PER_FRAME / DAY_RUNTIME_STEP_SECONDS);
 
 const CONTAINER_MIN_X = -TOTAL_WIDTH_WORLD / 2;
 const LANE_MIN_X = CONTAINER_MIN_X + YARD_WIDTH_WORLD;
@@ -1074,7 +1077,9 @@ function updateSimulationClock(deltaSeconds) {
     return;
   }
   const multiplier = effectivePlaybackSpeed() * Math.max(1, state.clockBoost || 1);
-  setPhaseClock(state.phaseClockSeconds + delta * multiplier);
+  const requestedAdvance = delta * multiplier;
+  const safeAdvance = Math.min(requestedAdvance, MAX_SIM_SECONDS_PER_FRAME);
+  setPhaseClock(state.phaseClockSeconds + safeAdvance);
 }
 
 function updateCameraTransition(deltaSeconds) {
@@ -2043,7 +2048,9 @@ async function runDayCycle(dayCycle, token) {
     parkingLaneX: world.trucks.parkingLaneX,
     slotZ: world.trucks.slotZ,
     initialCranePose: state.cranePose,
-    fixedStepSeconds: 0.2,
+    fixedStepSeconds: DAY_RUNTIME_STEP_SECONDS,
+    maxFixedStepsPerFrame: DAY_RUNTIME_MAX_STEPS_PER_FRAME,
+    maxSimAdvanceSeconds: MAX_SIM_SECONDS_PER_FRAME,
     entryProgressDistance: 2.6,
     approachBuffer: STEP.z * 0.34,
     nominalRoadSpeed: STEP.z * 0.64,

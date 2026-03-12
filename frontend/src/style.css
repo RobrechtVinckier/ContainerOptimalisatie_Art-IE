@@ -340,12 +340,54 @@ body {
   background: linear-gradient(160deg, #f8fbff, #ebf3fa);
 }
 
+.algo-settings-header {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .algo-settings h3 {
   margin: 0 0 8px;
   font-size: 0.8rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #4e7398;
+}
+
+.algo-settings-header h3 {
+  margin-bottom: 4px;
+}
+
+.algo-settings-header p {
+  margin: 0;
+  color: #587a98;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.algo-mode-switch {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.algo-mode-btn {
+  border: 1px solid #91b1d1;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: linear-gradient(170deg, #ffffff, #e1ebf6);
+  color: #35597d;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.algo-mode-btn.is-active {
+  background: linear-gradient(170deg, #ffd36d, #e4a31e);
+  border-color: #d3971d;
+  color: #382806;
 }
 
 .algo-grid {
@@ -359,6 +401,27 @@ body {
   gap: 4px;
   font-size: 0.74rem;
   color: #567998;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #dbe8f5;
+  color: #33597e;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
 }
 
 .algo-grid input {

@@ -64,6 +64,12 @@ const SCENE_METRICS = Object.freeze({
 });
 
 const app = document.querySelector("#app");
+
+function fieldLabel(text, tooltip) {
+  const safeTip = String(tooltip).replace(/"/g, "&quot;");
+  return `<span class="field-label"><span>${text}</span><span class="field-tip" title="${safeTip}">?</span></span>`;
+}
+
 app.innerHTML = `
   <div class="layout-shell">
     <header class="topbar reveal-a">
@@ -142,28 +148,40 @@ app.innerHTML = `
         <section class="algo-settings">
           <h3>Random Setup</h3>
           <div class="algo-grid">
-            <label><span title="Aantal verschillende containergroepen (elke groep krijgt een unieke kleur).">Groups</span><input id="random-groups" type="number" value="${DEFAULT_RANDOM_GROUPS}" /></label>
-            <label><span title="Totaal aantal containers dat in de yard geplaatst wordt voor de nieuwe random setup.">Total Containers</span><input id="random-container-count" type="number" max="${MAX_RANDOM_MOVABLE_CONTAINER_COUNT}" value="${YARD_CONFIG.containerCount}" /></label>
-            <label><span title="Minimum aantal containers dat elke groep minstens moet krijgen.">Min / Group</span><input id="random-min-per-group" type="number" value="20" /></label>
-            <label><span title="Maximum aantal containers dat een groep maximaal mag krijgen.">Max / Group</span><input id="random-max-per-group" type="number" value="60" /></label>
+            <label>${fieldLabel("Groups", "How many logical container groups to generate. Each group gets its own color.")}<input id="random-groups" type="number" value="${DEFAULT_RANDOM_GROUPS}" /></label>
+            <label>${fieldLabel("Total Containers", "How many containers are placed into the 5 x 10 x 4 yard for the random scenario.")}<input id="random-container-count" type="number" max="${MAX_RANDOM_MOVABLE_CONTAINER_COUNT}" value="${YARD_CONFIG.containerCount}" /></label>
+            <label>${fieldLabel("Min / Group", "Minimum number of containers each group should receive in the generated setup.")}<input id="random-min-per-group" type="number" value="20" /></label>
+            <label>${fieldLabel("Max / Group", "Maximum number of containers each group can receive in the generated setup.")}<input id="random-max-per-group" type="number" value="60" /></label>
           </div>
         </section>
 
-        <section class="algo-settings">
-          <h3>Algorithm Settings</h3>
-          <div class="algo-grid">
-            <label><span title="Gewicht van de cluster-verbetering in de move-score. Hoger = sterker clusteren.">Lambda</span><input id="algo-lam" type="number" min="0" step="0.1" value="1" /></label>
-            <label><span title="Aantal zoekiteraties in de tabu-fase. Meer iteraties kunnen betere oplossingen geven.">Tabu Iterations</span><input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
-            <label><span title="Lengte van de tabu-lijst: hoeveel recente moves tijdelijk verboden blijven.">Tabu Length</span><input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
-            <label><span title="Zoekradius op de x-as rond het groepscentrum voor kandidaat-doelstacks.">X Radius</span><input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
-            <label><span title="Aantal groepen met grootste spread dat prioriteit krijgt in de kandidatenzoektocht.">Top Groups</span><input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
-            <label><span title="Maximale beschikbare tijd (in seconden) voor de nachtcyclus van het algoritme.">Night Budget (s)</span><input id="algo-night-budget" type="number" min="1" step="100" value="28800" /></label>
-            <label><span title="Penaltygewicht voor stacks waarvan de topgroep niet overeenkomt met de stackinhoud.">Top Mismatch W</span><input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.1" /></label>
-            <label><span title="Penaltygewicht voor verwachte extra rehandles door gemixte groepen in stacks.">Rehandle W</span><input id="algo-stack-rehandle-weight" type="number" min="0" step="0.1" value="1.0" /></label>
-            <label><span title="Penaltygewicht voor onzuivere stacks (containers buiten de meerderheids-groep).">Impurity W</span><input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="1.4" /></label>
-            <label><span title="Penaltygewicht voor containers die dieper begraven liggen onder andere groepen.">Buried Foreign W</span><input id="algo-buried-foreign-weight" type="number" min="0" step="0.1" value="2.0" /></label>
-            <label><span title="Penaltygewicht voor het spreiden van één groep over veel verschillende stacks.">Fragmentation W</span><input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.9" /></label>
-            <label><span title="Als twee moves qua quality bijna gelijk zijn (binnen deze epsilon), kiest het algoritme de lagere operationele kost.">Quality Tie EPS</span><input id="algo-quality-tie-eps" type="number" min="0" step="0.000001" value="0.000000001" /></label>
+        <section class="algo-settings" id="algo-settings-panel">
+          <div class="algo-settings-header">
+            <div>
+              <h3>Algorithm Settings</h3>
+              <p>Basic mode is tuned for presentation. Advanced mode exposes the search internals.</p>
+            </div>
+            <div class="algo-mode-switch" role="tablist" aria-label="Algorithm settings detail level">
+              <button id="algo-mode-basic" class="algo-mode-btn is-active" type="button" data-settings-mode="basic">Basic Settings</button>
+              <button id="algo-mode-advanced" class="algo-mode-btn" type="button" data-settings-mode="advanced">Advanced Settings</button>
+            </div>
+          </div>
+          <div id="algo-panel-basic" class="algo-grid">
+            <label>${fieldLabel("Optimization Budget (s)", "Maximum amount of night-shift time the optimizer may spend on planned moves.")}<input id="algo-night-budget" type="number" min="1" step="100" value="28800" /></label>
+            <label>${fieldLabel("Cluster Weight", "How strongly the optimizer groups containers of the same company together. Higher values improve clustering but can increase travel.")}<input id="algo-lam" type="number" min="0" step="0.1" value="1" /></label>
+            <label>${fieldLabel("Energy Weight", "How much the optimizer penalizes energy-heavy moves. Higher values make long and vertical crane moves less attractive.")}<input id="algo-energy-weight" type="number" min="0" step="0.1" value="1" /></label>
+            <label>${fieldLabel("Rehandle Penalty", "Penalty for mixed stacks that are likely to require extra reshuffles later in the day.")}<input id="algo-stack-rehandle-weight" type="number" min="0" step="0.1" value="1.0" /></label>
+            <label>${fieldLabel("Day Prep Priority", "Penalty for containers buried under other groups. Higher values keep soon-to-load containers more accessible for the day shift.")}<input id="algo-buried-foreign-weight" type="number" min="0" step="0.1" value="2.0" /></label>
+          </div>
+          <div id="algo-panel-advanced" class="algo-grid" hidden>
+            <label>${fieldLabel("Tabu Iterations", "Number of search iterations in the tabu phase. More iterations can improve solutions but take longer.")}<input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
+            <label>${fieldLabel("Tabu Length", "How long recent moves stay temporarily forbidden to avoid immediate cycling.")}<input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
+            <label>${fieldLabel("Search Radius", "How far the candidate destination search may look from a group center on the width axis.")}<input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
+            <label>${fieldLabel("Focus Groups", "How many of the most spread-out groups are prioritized when generating candidate moves.")}<input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
+            <label>${fieldLabel("Top Mismatch Weight", "Penalty for stacks whose top container does not match the dominant group below it.")}<input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.1" /></label>
+            <label>${fieldLabel("Impurity Weight", "Penalty for stacks that mix multiple groups instead of staying compositionally clean.")}<input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="1.4" /></label>
+            <label>${fieldLabel("Fragmentation Weight", "Penalty for spreading the same group across too many stacks instead of keeping it compact.")}<input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.9" /></label>
+            <label>${fieldLabel("Quality Tie Epsilon", "If two moves are almost equal in quality, the optimizer uses this threshold before preferring the cheaper operational move.")}<input id="algo-quality-tie-eps" type="number" min="0" step="0.000001" value="0.000000001" /></label>
           </div>
         </section>
 
@@ -194,7 +212,12 @@ const refs = {
   randomContainerCount: document.getElementById("random-container-count"),
   randomMinPerGroup: document.getElementById("random-min-per-group"),
   randomMaxPerGroup: document.getElementById("random-max-per-group"),
+  algoSettingsPanel: document.getElementById("algo-settings-panel"),
+  algoModeButtons: Array.from(document.querySelectorAll("[data-settings-mode]")),
+  algoPanelBasic: document.getElementById("algo-panel-basic"),
+  algoPanelAdvanced: document.getElementById("algo-panel-advanced"),
   algoLam: document.getElementById("algo-lam"),
+  algoEnergyWeight: document.getElementById("algo-energy-weight"),
   algoTabuIters: document.getElementById("algo-tabu-iters"),
   algoTabuLen: document.getElementById("algo-tabu-len"),
   algoXRadius: document.getElementById("algo-x-radius"),
@@ -260,6 +283,7 @@ const state = {
   algoSyncTimer: null,
   algoSyncInFlight: false,
   algoSyncQueued: false,
+  algoSettingsMode: "basic",
   legendSignature: "",
 };
 
@@ -312,6 +336,17 @@ function setCyclePhase(phase, detail = "") {
     completed: "Cycle Complete",
   };
   refs.cycleLabel.textContent = detail || labels[phase] || "Cycle";
+}
+
+function setAlgorithmSettingsMode(mode) {
+  const nextMode = mode === "advanced" ? "advanced" : "basic";
+  state.algoSettingsMode = nextMode;
+  refs.algoSettingsPanel.dataset.mode = nextMode;
+  refs.algoPanelBasic.hidden = nextMode !== "basic";
+  refs.algoPanelAdvanced.hidden = nextMode !== "advanced";
+  for (const button of refs.algoModeButtons) {
+    button.classList.toggle("is-active", button.dataset.settingsMode === nextMode);
+  }
 }
 
 function setPhaseClock(elapsedSeconds) {
@@ -462,6 +497,7 @@ refs.passthroughToggle.addEventListener("change", (event) => {
 
 for (const field of [
   refs.algoLam,
+  refs.algoEnergyWeight,
   refs.algoTabuIters,
   refs.algoTabuLen,
   refs.algoXRadius,
@@ -479,6 +515,12 @@ for (const field of [
   });
 }
 
+for (const button of refs.algoModeButtons) {
+  button.addEventListener("click", () => {
+    setAlgorithmSettingsMode(button.dataset.settingsMode);
+  });
+}
+
 for (const eyeButton of refs.eyeButtons) {
   eyeButton.addEventListener("click", () => {
     snapCameraToView(eyeButton.dataset.view);
@@ -492,6 +534,7 @@ for (const [view, canvas] of Object.entries(refs.projections)) {
 }
 
 startRenderLoop();
+setAlgorithmSettingsMode("basic");
 await loadAlgorithmSettings();
 await generateScenario();
 
@@ -876,6 +919,7 @@ function updateStats() {
 
 function setAlgorithmFormValues(settings) {
   refs.algoLam.value = String(settings.lam);
+  refs.algoEnergyWeight.value = String(settings.energyWeight);
   refs.algoTabuIters.value = String(settings.tabuIters);
   refs.algoTabuLen.value = String(settings.tabuLen);
   refs.algoXRadius.value = String(settings.xRadius);
@@ -891,6 +935,7 @@ function setAlgorithmFormValues(settings) {
 
 function getAlgorithmFormValues() {
   const lam = Number(refs.algoLam.value);
+  const energyWeight = Number(refs.algoEnergyWeight.value);
   const tabuIters = Number(refs.algoTabuIters.value);
   const tabuLen = Number(refs.algoTabuLen.value);
   const xRadius = Number(refs.algoXRadius.value);
@@ -906,6 +951,8 @@ function getAlgorithmFormValues() {
   if (
     !Number.isFinite(lam)
     || lam < 0
+    || !Number.isFinite(energyWeight)
+    || energyWeight < 0
     || !Number.isFinite(tabuIters)
     || tabuIters < 1
     || !Number.isFinite(tabuLen)
@@ -934,6 +981,7 @@ function getAlgorithmFormValues() {
 
   return {
     lam,
+    energyWeight,
     tabuIters: Math.floor(tabuIters),
     tabuLen: Math.floor(tabuLen),
     xRadius: Math.floor(xRadius),
@@ -1327,7 +1375,7 @@ function setBusyUi(busy) {
 async function generateScenario(preparedRandomSetup = null) {
   const randomSetup = preparedRandomSetup || getRandomGenerationFormValues();
   if (!randomSetup) {
-    refs.statusText.textContent = "Random setup waiting: voer een geldige waarde in voor Total Containers.";
+    refs.statusText.textContent = "Random setup waiting: enter a valid Total Containers value.";
     return;
   }
   const randomSignature = randomSetupSignature(randomSetup);
@@ -1940,8 +1988,8 @@ async function solveScenario() {
   const remaining = state.dayStats?.remainingContainers ?? 0;
   refs.statusText.textContent =
     remaining === 0
-      ? `Day finished at 22:00. All scheduled offloads completed. Pas random setup velden aan voor de volgende cyclus.`
-      : `Day finished at 22:00 with ${remaining} container${remaining === 1 ? "" : "s"} still in yard. Pas random setup velden aan om door te gaan.`;
+      ? "Day finished at 22:00. All scheduled offloads completed. Adjust the random setup for the next cycle."
+      : `Day finished at 22:00 with ${remaining} container${remaining === 1 ? "" : "s"} still in yard. Adjust the random setup to continue.`;
 
   updateProjections();
   updateStats();

@@ -66,6 +66,32 @@ function compactTruckLabel(label) {
   return String(label).replace("Truck #", "#").replace("Truck ", "");
 }
 
+function appendSummary(host, jobs, groups, currentTimeSeconds, dayStartSeconds) {
+  const summary = document.createElement("div");
+  summary.className = "timeline-summary";
+
+  const planned = document.createElement("span");
+  planned.textContent = `${jobs.length} planned truck${jobs.length === 1 ? "" : "s"}`;
+  summary.appendChild(planned);
+
+  const companies = document.createElement("span");
+  companies.textContent = `${groups.length} compan${groups.length === 1 ? "y" : "ies"}`;
+  summary.appendChild(companies);
+
+  const mode = document.createElement("span");
+  mode.textContent = "Timeline is the primary day-flow view";
+  summary.appendChild(mode);
+
+  if (Number.isFinite(currentTimeSeconds)) {
+    const current = document.createElement("strong");
+    current.className = "timeline-summary-current";
+    current.textContent = `Current ${formatTime(currentTimeSeconds, dayStartSeconds)}`;
+    summary.appendChild(current);
+  }
+
+  host.appendChild(summary);
+}
+
 function appendAxis(host, dayDurationSeconds, dayStartSeconds) {
   const axis = document.createElement("div");
   axis.className = "timeline-axis";
@@ -200,9 +226,9 @@ export function renderDayTimeline(host, dayCycle, options = {}) {
 
   const timeline = document.createElement("div");
   timeline.className = "timeline-chart";
-  appendAxis(timeline, dayDurationSeconds, dayStartSeconds);
-
   const groups = groupJobsByCompany(jobs);
+  appendSummary(timeline, jobs, groups, currentTimeSeconds, dayStartSeconds);
+  appendAxis(timeline, dayDurationSeconds, dayStartSeconds);
   const rows = document.createElement("div");
   rows.className = "timeline-rows";
   for (const group of groups) {

@@ -110,14 +110,22 @@ body {
 
 .speed-box {
   display: grid;
-  grid-template-columns: max-content 1fr max-content;
+  grid-template-columns: 1fr;
   gap: 8px;
-  align-items: center;
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid #9ebdd9;
   background: linear-gradient(160deg, #ffffff, #eaf2f9);
   font-size: 0.84rem;
+  min-width: 290px;
+}
+
+.speed-box-header,
+.speed-boosts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .speed-box input[type="range"] {
@@ -128,6 +136,25 @@ body {
 .speed-box output {
   font-weight: 700;
   color: var(--accent);
+}
+
+.boost-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #375a7a;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.boost-toggle input {
+  accent-color: #e0a521;
+}
+
+#effective-speed {
+  color: #2b4867;
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .pass-box {
@@ -709,6 +736,12 @@ body {
 
   .speed-box {
     grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .speed-box-header,
+  .speed-boosts {
+    flex-wrap: wrap;
   }
 
   #scene-host {

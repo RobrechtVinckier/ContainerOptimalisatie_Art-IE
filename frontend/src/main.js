@@ -85,11 +85,18 @@ app.innerHTML = `
     <section class="toolbar reveal-b">
       <button id="solve-btn" class="btn">Solve With Backend Plan</button>
       <button id="pause-btn" class="btn" disabled>Pause</button>
-      <label class="speed-box" for="speed-slider">
-        <span>Playback Speed</span>
+      <div class="speed-box">
+        <div class="speed-box-header">
+          <span>Playback Speed</span>
+          <output id="speed-value">1x</output>
+        </div>
         <input id="speed-slider" type="range" min="1" max="${MAX_PLAYBACK_SPEED}" step="1" value="1" />
-        <output id="speed-value">1x</output>
-      </label>
+        <div class="speed-boosts">
+          <label class="boost-toggle" for="boost-10-toggle"><input id="boost-10-toggle" type="checkbox" /> <span>10x boost</span></label>
+          <label class="boost-toggle" for="boost-100-toggle"><input id="boost-100-toggle" type="checkbox" /> <span>100x boost</span></label>
+          <strong id="effective-speed">Effective 1x</strong>
+        </div>
+      </div>
       <label class="pass-box" for="passthrough-toggle">
         <input id="passthrough-toggle" type="checkbox" />
         <span>Passthrough</span>
@@ -217,6 +224,9 @@ const refs = {
   pauseBtn: document.getElementById("pause-btn"),
   speedSlider: document.getElementById("speed-slider"),
   speedValue: document.getElementById("speed-value"),
+  boost10Toggle: document.getElementById("boost-10-toggle"),
+  boost100Toggle: document.getElementById("boost-100-toggle"),
+  effectiveSpeed: document.getElementById("effective-speed"),
   passthroughToggle: document.getElementById("passthrough-toggle"),
   cycleBox: document.getElementById("cycle-box"),
   cycleLabel: document.getElementById("cycle-label"),
@@ -275,6 +285,7 @@ const state = {
   paused: false,
   uiBusy: false,
   speed: 1,
+  speedBoost: 1,
   runToken: 0,
   moveCursor: 0,
   moveTotal: 0,
@@ -343,6 +354,17 @@ function formatDuration(seconds) {
     return `${(safe / 60).toFixed(1)}m`;
   }
   return `${safe.toFixed(0)}s`;
+}
+
+function effectivePlaybackSpeed() {
+  return Math.max(1, state.speed) * Math.max(1, state.speedBoost || 1);
+}
+
+function updatePlaybackSpeedUi() {
+  refs.speedValue.textContent = `${state.speed}x`;
+  refs.boost10Toggle.checked = state.speedBoost === 10;
+  refs.boost100Toggle.checked = state.speedBoost === 100;
+  refs.effectiveSpeed.textContent = `Effective ${effectivePlaybackSpeed()}x`;
 }
 
 function setCyclePhase(phase, detail = "") {
@@ -488,6 +510,7 @@ setCyclePhase("nightSetup");
 setClockPhaseBase(NIGHT_CLOCK_BASE_SECONDS);
 setPhaseClock(0);
 clearRuntimeStats();
+updatePlaybackSpeedUi();
 
 refs.solveBtn.addEventListener("click", () => {
   solveScenario();
@@ -506,7 +529,17 @@ refs.pauseBtn.addEventListener("click", () => {
 refs.speedSlider.addEventListener("input", (event) => {
   state.speed = Math.min(MAX_PLAYBACK_SPEED, Math.max(1, Math.round(Number(event.target.value) || 1)));
   event.target.value = String(state.speed);
-  refs.speedValue.textContent = `${state.speed}x`;
+  updatePlaybackSpeedUi();
+});
+
+refs.boost10Toggle.addEventListener("change", (event) => {
+  state.speedBoost = event.target.checked ? 10 : 1;
+  updatePlaybackSpeedUi();
+});
+
+refs.boost100Toggle.addEventListener("change", (event) => {
+  state.speedBoost = event.target.checked ? 100 : 1;
+  updatePlaybackSpeedUi();
 });
 
 for (const field of [
@@ -1037,7 +1070,7 @@ function updateSimulationClock(deltaSeconds) {
   if (delta <= 0) {
     return;
   }
-  const multiplier = Math.max(1, state.speed) * Math.max(1, state.clockBoost || 1);
+  const multiplier = effectivePlaybackSpeed() * Math.max(1, state.clockBoost || 1);
   setPhaseClock(state.phaseClockSeconds + delta * multiplier);
 }
 
@@ -1366,7 +1399,7 @@ function updateProjections(force = false) {
   if (
     !force
     && state.solving
-    && state.speed >= FAST_FORWARD_SPEED_THRESHOLD
+    && effectivePlaybackSpeed() >= FAST_FORWARD_SPEED_THRESHOLD
     && now - state.lastProjectionDrawAt < FAST_FORWARD_PROJECTION_THROTTLE_MS
   ) {
     return;

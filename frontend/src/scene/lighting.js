@@ -22,6 +22,10 @@ const CELESTIAL_SUN_START_Z = 34;
 const CELESTIAL_SUN_END_Z = -26;
 const CELESTIAL_MOON_START_Z = 28;
 const CELESTIAL_MOON_END_Z = -32;
+const SUNRISE_START = 5 * 3600;
+const DAY_START = 6 * 3600;
+const SUNSET_START = 21 * 3600;
+const NIGHT_START = 22 * 3600;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -65,6 +69,32 @@ function celestialArcPosition(progress, startZ, endZ) {
     CELESTIAL_HORIZON_Y + Math.sin(angle) * CELESTIAL_RADIUS_Y,
     THREE.MathUtils.lerp(startZ, endZ, t),
   );
+}
+
+function skyPhaseProfile(timeSeconds) {
+  if (timeSeconds < SUNRISE_START) {
+    return { daylightBlend: 0, twilightBlend: 0, nightBlend: 1 };
+  }
+  if (timeSeconds < DAY_START) {
+    const t = smoothstep(SUNRISE_START, DAY_START, timeSeconds);
+    return {
+      daylightBlend: t,
+      twilightBlend: Math.sin(t * Math.PI),
+      nightBlend: 1 - t,
+    };
+  }
+  if (timeSeconds < SUNSET_START) {
+    return { daylightBlend: 1, twilightBlend: 0, nightBlend: 0 };
+  }
+  if (timeSeconds < NIGHT_START) {
+    const t = smoothstep(SUNSET_START, NIGHT_START, timeSeconds);
+    return {
+      daylightBlend: 1 - t,
+      twilightBlend: Math.sin(t * Math.PI),
+      nightBlend: t,
+    };
+  }
+  return { daylightBlend: 0, twilightBlend: 0, nightBlend: 1 };
 }
 
 function createCanvasTexture(size, draw) {
@@ -217,35 +247,33 @@ export function updateLighting(lighting, { phaseClockBase, phaseClockSeconds }) 
   const sceneTime = secondsSinceMidnight(phaseClockBase, phaseClockSeconds);
   const sunT = sunProgress(sceneTime);
   const moonT = moonProgress(sceneTime);
-  const daylight = sunT === null ? 0 : Math.sin(sunT * Math.PI);
-  const sunriseBlend = smoothstep(5 * 3600, 7.5 * 3600, sceneTime) * (1 - smoothstep(19 * 3600, 22 * 3600, sceneTime));
-  const twilight = clamp01(Math.max(sunriseBlend, 1 - smoothstep(20 * 3600, 23 * 3600, sceneTime)) * (1 - daylight * 0.75));
-  const skyWarmth = clamp01(daylight * 0.88 + twilight * 0.45);
+  const sunElevation = sunT === null ? 0 : Math.sin(sunT * Math.PI);
+  const { daylightBlend, twilightBlend, nightBlend } = skyPhaseProfile(sceneTime);
 
-  const sky = SKY_NIGHT.clone().lerp(SKY_DAWN, twilight).lerp(SKY_DAY, skyWarmth);
+  const sky = SKY_NIGHT.clone().lerp(SKY_DAWN, twilightBlend).lerp(SKY_DAY, daylightBlend);
   lighting.scene.background.copy(sky);
   if (lighting.scene.fog) {
-    lighting.scene.fog.color.copy(FOG_NIGHT.clone().lerp(FOG_DAY, clamp01(0.18 + skyWarmth * 0.82)));
+    lighting.scene.fog.color.copy(FOG_NIGHT.clone().lerp(FOG_DAY, daylightBlend * 0.9 + twilightBlend * 0.35));
   }
 
-  lighting.ambient.color.copy(AMBIENT_NIGHT).lerp(AMBIENT_DAY, clamp01(daylight * 0.82 + twilight * 0.28));
-  lighting.hemiLight.color.copy(HEMI_SKY_NIGHT).lerp(HEMI_SKY_DAY, skyWarmth);
-  lighting.hemiLight.groundColor.copy(HEMI_GROUND_NIGHT).lerp(HEMI_GROUND_DAY, clamp01(daylight * 0.72 + twilight * 0.18));
-  lighting.fillLight.color.copy(FILL_NIGHT).lerp(FILL_DAY, clamp01(daylight * 0.76 + twilight * 0.2));
+  lighting.ambient.color.copy(AMBIENT_NIGHT).lerp(AMBIENT_DAY, daylightBlend * 0.86 + twilightBlend * 0.16);
+  lighting.hemiLight.color.copy(HEMI_SKY_NIGHT).lerp(HEMI_SKY_DAY, daylightBlend * 0.88 + twilightBlend * 0.12);
+  lighting.hemiLight.groundColor.copy(HEMI_GROUND_NIGHT).lerp(HEMI_GROUND_DAY, daylightBlend * 0.72 + twilightBlend * 0.16);
+  lighting.fillLight.color.copy(FILL_NIGHT).lerp(FILL_DAY, daylightBlend * 0.72 + twilightBlend * 0.14);
   lighting.sunLight.color.copy(SUN_LIGHT_COLOR);
   lighting.moonLight.color.copy(MOON_LIGHT_COLOR);
 
-  lighting.ambient.intensity = 0.52 + daylight * 0.3 + twilight * 0.08;
-  lighting.hemiLight.intensity = 0.4 + daylight * 0.34 + twilight * 0.08;
-  lighting.sunLight.intensity = 0.1 + daylight * 1.18 + twilight * 0.24;
-  lighting.fillLight.intensity = 0.28 + daylight * 0.26 + twilight * 0.06;
-  lighting.moonLight.intensity = 0.16 + (1 - daylight) * 0.18;
+  lighting.ambient.intensity = 0.5 + daylightBlend * 0.28 + twilightBlend * 0.06;
+  lighting.hemiLight.intensity = 0.4 + daylightBlend * 0.3 + twilightBlend * 0.06;
+  lighting.sunLight.intensity = sunT === null ? 0 : 0.08 + sunElevation * 1.12;
+  lighting.fillLight.intensity = 0.28 + daylightBlend * 0.24 + twilightBlend * 0.04;
+  lighting.moonLight.intensity = 0.14 + nightBlend * 0.22 + twilightBlend * 0.05;
 
   const sunPosition = celestialArcPosition(sunT ?? 0, CELESTIAL_SUN_START_Z, CELESTIAL_SUN_END_Z);
   lighting.sun.position.copy(sunPosition);
   lighting.sun.visible = sunT !== null;
   lighting.sunLight.position.copy(lighting.sun.position);
-  lighting.fillLight.position.set(-lighting.sun.position.x * 0.28, 28 + daylight * 6, 24);
+  lighting.fillLight.position.set(-lighting.sun.position.x * 0.28, 28 + daylightBlend * 6, 24);
 
   const moonPosition = celestialArcPosition(moonT ?? 0, CELESTIAL_MOON_START_Z, CELESTIAL_MOON_END_Z);
   lighting.moon.position.copy(moonPosition);

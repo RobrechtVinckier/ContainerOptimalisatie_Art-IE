@@ -1,9 +1,9 @@
 import * as THREE from "three";
 
-const SKY_NIGHT = new THREE.Color("#06111e");
+const SKY_NIGHT = new THREE.Color("#0d1c30");
 const SKY_DAWN = new THREE.Color("#f0b46b");
 const SKY_DAY = new THREE.Color("#dcefff");
-const FOG_NIGHT = new THREE.Color("#102131");
+const FOG_NIGHT = new THREE.Color("#263a4b");
 const FOG_DAY = new THREE.Color("#d8e6f4");
 const CELESTIAL_RADIUS_X = 88;
 const CELESTIAL_RADIUS_Y = 74;
@@ -58,10 +58,13 @@ function celestialArcPosition(progress, startZ, endZ) {
 }
 
 export function createLighting(scene) {
-  const ambient = new THREE.AmbientLight("#a6bfd6", 0.62);
+  const ambient = new THREE.AmbientLight("#d8e0e8", 0.8);
   scene.add(ambient);
 
-  const sunLight = new THREE.DirectionalLight("#fff1c9", 1.1);
+  const hemiLight = new THREE.HemisphereLight("#dcecff", "#6d7f91", 0.56);
+  scene.add(hemiLight);
+
+  const sunLight = new THREE.DirectionalLight("#fff3d6", 1.08);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(2048, 2048);
   sunLight.shadow.camera.near = 1;
@@ -72,11 +75,11 @@ export function createLighting(scene) {
   sunLight.shadow.camera.bottom = -65;
   scene.add(sunLight);
 
-  const fillLight = new THREE.DirectionalLight("#b8d8ff", 0.62);
+  const fillLight = new THREE.DirectionalLight("#eef4fb", 0.74);
   fillLight.position.set(-30, 26, -22);
   scene.add(fillLight);
 
-  const moonLight = new THREE.DirectionalLight("#9db7ff", 0.18);
+  const moonLight = new THREE.DirectionalLight("#dbe5f2", 0.24);
   scene.add(moonLight);
 
   const sun = new THREE.Mesh(
@@ -96,6 +99,7 @@ export function createLighting(scene) {
   return {
     scene,
     ambient,
+    hemiLight,
     sunLight,
     fillLight,
     moonLight,
@@ -115,19 +119,20 @@ export function updateLighting(lighting, { phaseClockBase, phaseClockSeconds }) 
   const sky = SKY_NIGHT.clone().lerp(SKY_DAWN, twilight).lerp(SKY_DAY, daylight);
   lighting.scene.background.copy(sky);
   if (lighting.scene.fog) {
-    lighting.scene.fog.color.copy(FOG_NIGHT.clone().lerp(FOG_DAY, 0.25 + daylight * 0.75));
+    lighting.scene.fog.color.copy(FOG_NIGHT.clone().lerp(FOG_DAY, 0.34 + daylight * 0.66));
   }
 
-  lighting.ambient.intensity = 0.28 + daylight * 0.72 + twilight * 0.16;
-  lighting.sunLight.intensity = 0.08 + daylight * 1.26 + twilight * 0.32;
-  lighting.fillLight.intensity = 0.14 + daylight * 0.52 + twilight * 0.12;
-  lighting.moonLight.intensity = 0.14 + (1 - daylight) * 0.48;
+  lighting.ambient.intensity = 0.42 + daylight * 0.44 + twilight * 0.12;
+  lighting.hemiLight.intensity = 0.34 + daylight * 0.46 + twilight * 0.14;
+  lighting.sunLight.intensity = 0.1 + daylight * 1.18 + twilight * 0.24;
+  lighting.fillLight.intensity = 0.22 + daylight * 0.38 + twilight * 0.08;
+  lighting.moonLight.intensity = 0.18 + (1 - daylight) * 0.22;
 
   const sunPosition = celestialArcPosition(sunT ?? 0, CELESTIAL_SUN_START_Z, CELESTIAL_SUN_END_Z);
   lighting.sun.position.copy(sunPosition);
   lighting.sun.visible = sunT !== null;
   lighting.sunLight.position.copy(lighting.sun.position);
-  lighting.fillLight.position.set(-lighting.sun.position.x * 0.45, 24 + daylight * 10, 28);
+  lighting.fillLight.position.set(-lighting.sun.position.x * 0.28, 28 + daylight * 6, 24);
 
   const moonPosition = celestialArcPosition(moonT ?? 0, CELESTIAL_MOON_START_Z, CELESTIAL_MOON_END_Z);
   lighting.moon.position.copy(moonPosition);

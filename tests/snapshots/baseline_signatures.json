@@ -149,10 +149,10 @@
       "dayEndSeconds": 79200,
       "dayStartSeconds": 21600,
       "lengthCostWeight": 10,
-      "makespanSeconds": 52684.986667,
+      "makespanSeconds": 1229.711667,
       "remainingContainers": 0,
-      "score": 0.923788,
-      "totalCraneWeightedCost": 287.0,
+      "score": 24.756009,
+      "totalCraneWeightedCost": 157.0,
       "totalJobs": 18,
       "totalLaneWaitSeconds": 0.0,
       "trucksUsed": 18

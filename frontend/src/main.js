@@ -171,6 +171,15 @@ app.innerHTML = `
           </div>
         </div>
 
+        <div class="projection-grid" id="projection-grid">
+          <article class="projection-card" data-view="top"><header><h3>Top</h3><button class="eye-btn" data-view="top" aria-label="Focus top view">Eye</button></header><canvas id="view-top" width="240" height="160"></canvas></article>
+          <article class="projection-card" data-view="bottom"><header><h3>Bottom</h3><button class="eye-btn" data-view="bottom" aria-label="Focus bottom view">Eye</button></header><canvas id="view-bottom" width="240" height="160"></canvas></article>
+          <article class="projection-card" data-view="front"><header><h3>Front</h3><button class="eye-btn" data-view="front" aria-label="Focus front view">Eye</button></header><canvas id="view-front" width="240" height="160"></canvas></article>
+          <article class="projection-card" data-view="back"><header><h3>Back</h3><button class="eye-btn" data-view="back" aria-label="Focus back view">Eye</button></header><canvas id="view-back" width="240" height="160"></canvas></article>
+          <article class="projection-card" data-view="left"><header><h3>Left</h3><button class="eye-btn" data-view="left" aria-label="Focus left view">Eye</button></header><canvas id="view-left" width="240" height="160"></canvas></article>
+          <article class="projection-card" data-view="right"><header><h3>Right</h3><button class="eye-btn" data-view="right" aria-label="Focus right view">Eye</button></header><canvas id="view-right" width="240" height="160"></canvas></article>
+        </div>
+
         <section class="algo-settings">
           <h3>Random Setup</h3>
           <div class="algo-grid">
@@ -214,15 +223,6 @@ app.innerHTML = `
             </div>
           </div>
         </section>
-
-        <div class="projection-grid" id="projection-grid">
-          <article class="projection-card" data-view="top"><header><h3>Top</h3><button class="eye-btn" data-view="top" aria-label="Focus top view">Eye</button></header><canvas id="view-top" width="240" height="160"></canvas></article>
-          <article class="projection-card" data-view="bottom"><header><h3>Bottom</h3><button class="eye-btn" data-view="bottom" aria-label="Focus bottom view">Eye</button></header><canvas id="view-bottom" width="240" height="160"></canvas></article>
-          <article class="projection-card" data-view="front"><header><h3>Front</h3><button class="eye-btn" data-view="front" aria-label="Focus front view">Eye</button></header><canvas id="view-front" width="240" height="160"></canvas></article>
-          <article class="projection-card" data-view="back"><header><h3>Back</h3><button class="eye-btn" data-view="back" aria-label="Focus back view">Eye</button></header><canvas id="view-back" width="240" height="160"></canvas></article>
-          <article class="projection-card" data-view="left"><header><h3>Left</h3><button class="eye-btn" data-view="left" aria-label="Focus left view">Eye</button></header><canvas id="view-left" width="240" height="160"></canvas></article>
-          <article class="projection-card" data-view="right"><header><h3>Right</h3><button class="eye-btn" data-view="right" aria-label="Focus right view">Eye</button></header><canvas id="view-right" width="240" height="160"></canvas></article>
-        </div>
       </aside>
     </main>
   </div>

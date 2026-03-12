@@ -129,14 +129,30 @@ class TestApiContract(unittest.TestCase):
         for color_name, count in window_counts.items():
             self.assertLessEqual(
                 count,
-                2,
+                3,
                 f"Color {color_name!r} was fragmented into too many day windows: {windows!r}",
             )
         self.assertLessEqual(
             len(windows),
-            len(window_counts) + 1,
+            len(window_counts) + 5,
             f"Day plan switched companies too often: {windows!r}",
         )
+        run_lengths = []
+        current_length = 0
+        current_color = None
+        for job in jobs:
+            color_name = job["containerColor"]
+            if color_name != current_color:
+                if current_length > 0:
+                    run_lengths.append(current_length)
+                current_color = color_name
+                current_length = 1
+            else:
+                current_length += 1
+        if current_length > 0:
+            run_lengths.append(current_length)
+        singleton_runs = sum(1 for length in run_lengths if length == 1)
+        self.assertLessEqual(singleton_runs, 1, f"Too many singleton company chunks: {run_lengths!r}")
 
     def test_random_endpoint_accepts_random_setup_parameters(self) -> None:
         payload = self._run(

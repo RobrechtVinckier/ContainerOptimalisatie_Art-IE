@@ -26,6 +26,12 @@ from ..core.constants import (
 from .stack_service import clone_stacks
 from .timing_service import crane_move_seconds, weighted_xy_cost
 
+PREFERRED_COMPANY_CHUNK = 4
+MAX_COMPANY_CHUNK = 6
+EARLY_SWITCH_PENALTY = 280.0
+LONG_RUN_CONTINUATION_PENALTY = 150.0
+ALTERNATE_WAVE_SWITCH_BONUS = 70.0
+
 
 def _is_hex_color(color_value: str) -> bool:
     if len(color_value) != 7 or not color_value.startswith("#"):
@@ -78,6 +84,72 @@ def _stack_top_run_length(stack: List[dict]) -> int:
     return run
 
 
+def _useful_wave_run_length(stack: List[dict]) -> int:
+    return min(_stack_top_run_length(stack), PREFERRED_COMPANY_CHUNK)
+
+
+def _current_company_run(jobs: List[dict]) -> Tuple[str | None, int]:
+    if not jobs:
+        return None, 0
+    last_color = jobs[-1]["containerColor"]
+    run_length = 0
+    for job in reversed(jobs):
+        if job["containerColor"] != last_color:
+            break
+        run_length += 1
+    return last_color, run_length
+
+
+def _target_chunk_size(metrics_by_color: Dict[str, Dict[str, float]], color_name: str) -> int:
+    metrics = metrics_by_color.get(color_name, {})
+    top_count = metrics.get("topCount", 0.0)
+    wave_potential = metrics.get("wavePotential", 0.0)
+    extra = 1 if min(top_count, wave_potential) >= 6.0 else 0
+    return max(3, min(MAX_COMPANY_CHUNK, PREFERRED_COMPANY_CHUNK + extra))
+
+
+def _avg_access_cost(metrics_by_color: Dict[str, Dict[str, float]], color_name: str) -> float:
+    metrics = metrics_by_color.get(color_name, {})
+    top_count = max(1.0, metrics.get("topCount", 0.0))
+    return metrics.get("widthCost", 0.0) / top_count
+
+
+def _should_rotate_company_chunk(
+    *,
+    active_color: str | None,
+    last_color: str | None,
+    run_length: int,
+    current_time_s: float,
+    color_zone_by_name: Dict[str, int],
+    accessible_metrics: Dict[str, Dict[str, float]],
+) -> bool:
+    if active_color is None or last_color is None or active_color != last_color:
+        return False
+    if len(accessible_metrics) <= 1:
+        return False
+
+    target_chunk = _target_chunk_size(accessible_metrics, active_color)
+    if run_length < target_chunk:
+        return False
+
+    phase_ratio = min(0.999999, max(0.0, current_time_s / float(DAY_DURATION_SECONDS)))
+    current_zone = min(2, int(phase_ratio * 3.0))
+    current_zone_gap = abs(color_zone_by_name.get(active_color, 1) - current_zone)
+    current_avg_cost = _avg_access_cost(accessible_metrics, active_color)
+
+    for color_name, metrics in accessible_metrics.items():
+        if color_name == active_color:
+            continue
+        if metrics.get("topCount", 0.0) < 2.0 or metrics.get("wavePotential", 0.0) < 2.0:
+            continue
+        alt_zone_gap = abs(color_zone_by_name.get(color_name, 1) - current_zone)
+        alt_avg_cost = _avg_access_cost(accessible_metrics, color_name)
+        if alt_zone_gap <= current_zone_gap + 1 and alt_avg_cost <= current_avg_cost + 16.0:
+            return True
+
+    return run_length >= target_chunk + 2
+
+
 def _accessible_wave_metrics(
     stacks: List[List[List[dict]]],
     remaining_by_color: Dict[str, int],
@@ -101,7 +173,7 @@ def _accessible_wave_metrics(
                 },
             )
             metrics["topCount"] += 1.0
-            metrics["wavePotential"] += float(_stack_top_run_length(stack))
+            metrics["wavePotential"] += float(_useful_wave_run_length(stack))
             metrics["widthCost"] += weighted_xy_cost(source_x, source_z, TRUCK_PICKUP_X, source_z)
     return metrics_by_color
 
@@ -112,19 +184,35 @@ def _pick_active_group_color(
     *,
     current_time_s: float,
     color_zone_by_name: Dict[str, int],
+    last_color: str | None,
+    last_run_length: int,
+    blocked_color: str | None = None,
 ) -> str | None:
     """Pick the next company batch using accessible wave potential, not yard clustering."""
     accessible_metrics = _accessible_wave_metrics(stacks, remaining_by_color)
     if not accessible_metrics:
         return None
 
+    eligible_colors = [
+        color_name
+        for color_name in accessible_metrics.keys()
+        if color_name != blocked_color
+    ]
+    if not eligible_colors:
+        eligible_colors = list(accessible_metrics.keys())
+
     phase_ratio = min(0.999999, max(0.0, current_time_s / float(DAY_DURATION_SECONDS)))
     current_zone = min(2, int(phase_ratio * 3.0))
 
     return min(
-        accessible_metrics.keys(),
+        eligible_colors,
         key=lambda color_name: (
             abs(color_zone_by_name.get(color_name, 1) - current_zone),
+            (
+                max(0, last_run_length - _target_chunk_size(accessible_metrics, color_name) + 1)
+                if color_name == last_color
+                else 0
+            ),
             max(0.0, remaining_by_color.get(color_name, 0) - accessible_metrics[color_name]["wavePotential"]),
             -accessible_metrics[color_name]["wavePotential"],
             -accessible_metrics[color_name]["topCount"],
@@ -254,6 +342,20 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
         if not accessible_colors:
             break
 
+        last_color, current_run_length = _current_company_run(jobs)
+        accessible_metrics = _accessible_wave_metrics(working, remaining_by_color)
+        blocked_group_color = None
+        if _should_rotate_company_chunk(
+            active_color=active_group_color,
+            last_color=last_color,
+            run_length=current_run_length,
+            current_time_s=crane_time,
+            color_zone_by_name=color_zone_by_name,
+            accessible_metrics=accessible_metrics,
+        ):
+            blocked_group_color = active_group_color
+            active_group_color = None
+
         if (
             active_group_color is None
             or remaining_by_color.get(active_group_color, 0) <= 0
@@ -264,6 +366,9 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 remaining_by_color,
                 current_time_s=crane_time,
                 color_zone_by_name=color_zone_by_name,
+                last_color=last_color,
+                last_run_length=current_run_length,
+                blocked_color=blocked_group_color,
             )
             if active_group_color is None:
                 break
@@ -324,13 +429,28 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 )
                 if depart_time > DAY_DURATION_SECONDS:
                     continue
-                same_company_bonus = -45.0 if jobs and jobs[-1]["containerColor"] == container["color"] else 0.0
+                run_target = _target_chunk_size(accessible_metrics, container["color"])
+                same_company_bonus = 0.0
+                long_run_penalty = 0.0
+                if jobs and jobs[-1]["containerColor"] == container["color"]:
+                    if current_run_length < run_target:
+                        same_company_bonus = -42.0
+                    else:
+                        overflow = current_run_length - run_target + 1
+                        same_company_bonus = -12.0
+                        long_run_penalty = float(overflow * overflow) * LONG_RUN_CONTINUATION_PENALTY
                 company_switch_penalty = 0.0
                 if jobs and jobs[-1]["containerColor"] != container["color"]:
                     previous_color = jobs[-1]["containerColor"]
+                    previous_run_target = _target_chunk_size(accessible_metrics, previous_color)
                     company_switch_penalty += DAY_COMPANY_SWITCH_PENALTY
                     if remaining_by_color.get(previous_color, 0) > 0:
-                        company_switch_penalty += DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY
+                        if current_run_length < previous_run_target:
+                            company_switch_penalty += EARLY_SWITCH_PENALTY
+                        else:
+                            company_switch_penalty += DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY * 0.18
+                            if accessible_metrics.get(container["color"], {}).get("wavePotential", 0.0) >= 2.0:
+                                company_switch_penalty -= ALTERNATE_WAVE_SWITCH_BONUS
                 # Optimize for crane efficiency first: expensive lengthwise crane movement
                 # is encoded in horizontal_weighted_cost (length axis weighted 10x).
                 score = (
@@ -341,6 +461,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                     + phase_alignment_penalty
                     + schedule_spread_penalty
                     + same_company_bonus
+                    + long_run_penalty
                     + rng.random() * 0.001
                 )
                 if best_score is None or score < best_score:

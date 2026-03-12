@@ -28,9 +28,11 @@ from .timing_service import crane_move_seconds, weighted_xy_cost
 
 PREFERRED_COMPANY_CHUNK = 4
 MAX_COMPANY_CHUNK = 6
-EARLY_SWITCH_PENALTY = 280.0
-LONG_RUN_CONTINUATION_PENALTY = 150.0
+EARLY_SWITCH_PENALTY = 240.0
+LONG_RUN_CONTINUATION_PENALTY = 90.0
 ALTERNATE_WAVE_SWITCH_BONUS = 70.0
+PROGRESS_LEAD_PENALTY = 180.0
+PROGRESS_CATCHUP_BONUS = 110.0
 
 
 def _is_hex_color(color_value: str) -> bool:
@@ -114,42 +116,6 @@ def _avg_access_cost(metrics_by_color: Dict[str, Dict[str, float]], color_name: 
     return metrics.get("widthCost", 0.0) / top_count
 
 
-def _should_rotate_company_chunk(
-    *,
-    active_color: str | None,
-    last_color: str | None,
-    run_length: int,
-    current_time_s: float,
-    color_zone_by_name: Dict[str, int],
-    accessible_metrics: Dict[str, Dict[str, float]],
-) -> bool:
-    if active_color is None or last_color is None or active_color != last_color:
-        return False
-    if len(accessible_metrics) <= 1:
-        return False
-
-    target_chunk = _target_chunk_size(accessible_metrics, active_color)
-    if run_length < target_chunk:
-        return False
-
-    phase_ratio = min(0.999999, max(0.0, current_time_s / float(DAY_DURATION_SECONDS)))
-    current_zone = min(2, int(phase_ratio * 3.0))
-    current_zone_gap = abs(color_zone_by_name.get(active_color, 1) - current_zone)
-    current_avg_cost = _avg_access_cost(accessible_metrics, active_color)
-
-    for color_name, metrics in accessible_metrics.items():
-        if color_name == active_color:
-            continue
-        if metrics.get("topCount", 0.0) < 2.0 or metrics.get("wavePotential", 0.0) < 2.0:
-            continue
-        alt_zone_gap = abs(color_zone_by_name.get(color_name, 1) - current_zone)
-        alt_avg_cost = _avg_access_cost(accessible_metrics, color_name)
-        if alt_zone_gap <= current_zone_gap + 1 and alt_avg_cost <= current_avg_cost + 16.0:
-            return True
-
-    return run_length >= target_chunk + 2
-
-
 def _accessible_wave_metrics(
     stacks: List[List[List[dict]]],
     remaining_by_color: Dict[str, int],
@@ -178,105 +144,73 @@ def _accessible_wave_metrics(
     return metrics_by_color
 
 
-def _pick_active_group_color(
-    stacks: List[List[List[dict]]],
-    remaining_by_color: Dict[str, int],
+def _color_progress_ratio(
+    color_name: str,
     *,
-    current_time_s: float,
-    color_zone_by_name: Dict[str, int],
-    last_color: str | None,
-    last_run_length: int,
-    blocked_color: str | None = None,
-) -> str | None:
-    """Pick the next company batch using accessible wave potential, not yard clustering."""
-    accessible_metrics = _accessible_wave_metrics(stacks, remaining_by_color)
-    if not accessible_metrics:
-        return None
-
-    eligible_colors = [
-        color_name
-        for color_name in accessible_metrics.keys()
-        if color_name != blocked_color
-    ]
-    if not eligible_colors:
-        eligible_colors = list(accessible_metrics.keys())
-
-    phase_ratio = min(0.999999, max(0.0, current_time_s / float(DAY_DURATION_SECONDS)))
-    current_zone = min(2, int(phase_ratio * 3.0))
-
-    return min(
-        eligible_colors,
-        key=lambda color_name: (
-            abs(color_zone_by_name.get(color_name, 1) - current_zone),
-            (
-                max(0, last_run_length - _target_chunk_size(accessible_metrics, color_name) + 1)
-                if color_name == last_color
-                else 0
-            ),
-            max(0.0, remaining_by_color.get(color_name, 0) - accessible_metrics[color_name]["wavePotential"]),
-            -accessible_metrics[color_name]["wavePotential"],
-            -accessible_metrics[color_name]["topCount"],
-            accessible_metrics[color_name]["widthCost"] / max(1.0, accessible_metrics[color_name]["topCount"]),
-            -remaining_by_color.get(color_name, 0),
-            color_name,
-        ),
-    )
+    scheduled_trips_by_color: Dict[str, int],
+    total_by_color: Dict[str, int],
+) -> float:
+    total = max(1, total_by_color.get(color_name, 0))
+    return scheduled_trips_by_color.get(color_name, 0) / float(total)
 
 
-def _preferred_color_order_from_access(stacks: List[List[List[dict]]], remaining_by_color: Dict[str, int]) -> List[str]:
-    accessible_metrics = _accessible_wave_metrics(stacks, remaining_by_color)
-    return sorted(
-        remaining_by_color.keys(),
-        key=lambda color_name: (
-            max(0.0, remaining_by_color.get(color_name, 0) - accessible_metrics.get(color_name, {}).get("wavePotential", 0.0)),
-            -(accessible_metrics.get(color_name, {}).get("wavePotential", 0.0)),
-            -(accessible_metrics.get(color_name, {}).get("topCount", 0.0)),
-            (
-                accessible_metrics.get(color_name, {}).get("widthCost", 0.0)
-                / max(1.0, accessible_metrics.get(color_name, {}).get("topCount", 0.0))
-            ),
-            -(remaining_by_color.get(color_name, 0)),
-            color_name,
-        ),
-    )
-
-
-def _color_zone_map(ordered_colors: List[str]) -> Dict[str, int]:
-    if not ordered_colors:
-        return {}
-    if len(ordered_colors) == 1:
-        return {ordered_colors[0]: 0}
-
-    last_index = max(1, len(ordered_colors) - 1)
-    return {
-        color_name: min(2, round((index / last_index) * 2))
-        for index, color_name in enumerate(ordered_colors)
-    }
-
-
-def _zone_window(zone_index: int) -> Tuple[float, float]:
-    zone_length = DAY_DURATION_SECONDS / 3.0
-    overlap = zone_length * 0.18
-    start = zone_index * zone_length - (overlap if zone_index > 0 else 0.0)
-    end = (zone_index + 1) * zone_length + (overlap if zone_index < 2 else 0.0)
-    return max(0.0, start), min(float(DAY_DURATION_SECONDS), end)
-
-
-def _target_load_start(
+def _continuation_preference(
     *,
     color_name: str,
-    trip_index: int,
-    total_trips: int,
-    color_zone_by_name: Dict[str, int],
+    last_color: str | None,
+    run_length: int,
+    accessible_metrics: Dict[str, Dict[str, float]],
+    remaining_by_color: Dict[str, int],
 ) -> float:
-    zone_index = color_zone_by_name.get(color_name, 1)
-    window_start, window_end = _zone_window(zone_index)
-    usable_start = window_start + (window_end - window_start) * 0.08
-    usable_end = window_end - (window_end - window_start) * 0.08
-    if total_trips <= 1:
-        return (usable_start + usable_end) * 0.5
-    fraction = trip_index / max(1, total_trips - 1)
-    return usable_start + (usable_end - usable_start) * fraction
+    if last_color is None:
+        return 0.0
+
+    if color_name == last_color:
+        run_target = _target_chunk_size(accessible_metrics, color_name)
+        if run_length < run_target:
+            return -42.0
+        overflow = run_length - run_target + 1
+        return -12.0 + float(overflow * overflow) * LONG_RUN_CONTINUATION_PENALTY
+
+    switch_penalty = DAY_COMPANY_SWITCH_PENALTY
+    previous_run_target = _target_chunk_size(accessible_metrics, last_color)
+    if last_color in accessible_metrics and run_length < previous_run_target:
+        switch_penalty += EARLY_SWITCH_PENALTY
+    elif remaining_by_color.get(last_color, 0) > 0:
+        switch_penalty += DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY * 0.1
+
+    candidate_wave = accessible_metrics.get(color_name, {}).get("wavePotential", 0.0)
+    candidate_cost = _avg_access_cost(accessible_metrics, color_name)
+    previous_cost = _avg_access_cost(accessible_metrics, last_color)
+    if candidate_wave >= 2.0 and candidate_cost <= previous_cost + 18.0:
+        switch_penalty -= ALTERNATE_WAVE_SWITCH_BONUS
+    return switch_penalty
+
+
+def _progress_balance_adjustment(
+    *,
+    color_name: str,
+    last_color: str | None,
+    accessible_metrics: Dict[str, Dict[str, float]],
+    scheduled_trips_by_color: Dict[str, int],
+    total_by_color: Dict[str, int],
+    total_jobs_scheduled: int,
+) -> float:
+    total_jobs = max(1, sum(total_by_color.values()))
+    overall_progress = total_jobs_scheduled / float(total_jobs)
+    color_progress = _color_progress_ratio(
+        color_name,
+        scheduled_trips_by_color=scheduled_trips_by_color,
+        total_by_color=total_by_color,
+    )
+    lead = max(0.0, color_progress - overall_progress - 0.12)
+    lag = max(0.0, overall_progress - color_progress - 0.15)
+
+    adjustment = lead * PROGRESS_LEAD_PENALTY
+    if last_color is not None and color_name != last_color:
+        if accessible_metrics.get(color_name, {}).get("wavePotential", 0.0) >= 2.0:
+            adjustment -= lag * PROGRESS_CATCHUP_BONUS
+    return adjustment
 
 
 def estimate_truck_timing(
@@ -310,8 +244,6 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) + 1
     total_by_color = dict(remaining_by_color)
     company_profiles = {color_name: _company_profile_for_color(color_name) for color_name in remaining_by_color}
-    preferred_color_order = _preferred_color_order_from_access(working, remaining_by_color)
-    color_zone_by_name = _color_zone_map(preferred_color_order)
     scheduled_trips_by_color: Dict[str, int] = {color_name: 0 for color_name in remaining_by_color}
     slot_z_map = [slot_to_stack_z(slot) for slot in range(DAY_TRUCK_SLOTS)]
     slot_free_at = [0.0] * DAY_TRUCK_SLOTS
@@ -327,7 +259,6 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
     total_crane_weighted_cost = 0.0
     total_lane_wait_seconds = 0.0
     jobs: List[dict] = []
-    active_group_color: str | None = None
 
     while True:
         candidates = top_containers(working)
@@ -344,44 +275,12 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
 
         last_color, current_run_length = _current_company_run(jobs)
         accessible_metrics = _accessible_wave_metrics(working, remaining_by_color)
-        blocked_group_color = None
-        if _should_rotate_company_chunk(
-            active_color=active_group_color,
-            last_color=last_color,
-            run_length=current_run_length,
-            current_time_s=crane_time,
-            color_zone_by_name=color_zone_by_name,
-            accessible_metrics=accessible_metrics,
-        ):
-            blocked_group_color = active_group_color
-            active_group_color = None
-
-        if (
-            active_group_color is None
-            or remaining_by_color.get(active_group_color, 0) <= 0
-            or active_group_color not in accessible_colors
-        ):
-            active_group_color = _pick_active_group_color(
-                working,
-                remaining_by_color,
-                current_time_s=crane_time,
-                color_zone_by_name=color_zone_by_name,
-                last_color=last_color,
-                last_run_length=current_run_length,
-                blocked_color=blocked_group_color,
-            )
-            if active_group_color is None:
-                break
-
         group_candidates = [
             (source_x, source_z, source_y, container)
             for source_x, source_z, source_y, container in candidates
-            if container["color"] == active_group_color
+            if remaining_by_color.get(container["color"], 0) > 0
         ]
         if not group_candidates:
-            # If the current company becomes buried under other groups, switch to
-            # another accessible company instead of starving the rest of the day plan.
-            active_group_color = None
             continue
 
         best_choice = None
@@ -405,22 +304,8 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                     dst_z=slot_z,
                     dst_level=0,
                 )
-                trip_index = scheduled_trips_by_color.get(container["color"], 0)
-                target_load_start = _target_load_start(
-                    color_name=container["color"],
-                    trip_index=trip_index,
-                    total_trips=total_by_color.get(container["color"], 1),
-                    color_zone_by_name=color_zone_by_name,
-                )
-                zone_start, zone_end = _zone_window(color_zone_by_name.get(container["color"], 1))
-                release_slack = (zone_end - zone_start) * 0.14
-                release_time = max(zone_start, target_load_start - release_slack)
-                tentative_load_start = max(crane_time, slot_free_at[slot_index], release_time)
+                tentative_load_start = max(crane_time, slot_free_at[slot_index])
                 tentative_load_end = tentative_load_start + crane_task_seconds
-                phase_ratio = min(0.999999, max(0.0, tentative_load_start / float(DAY_DURATION_SECONDS)))
-                current_zone = min(2, int(phase_ratio * 3.0))
-                phase_alignment_penalty = abs(color_zone_by_name.get(container["color"], 1) - current_zone) * 320.0
-                schedule_spread_penalty = abs(tentative_load_start - target_load_start) * 0.12
                 arrival_time, depart_time, lane_wait_seconds = estimate_truck_timing(
                     load_start=tentative_load_start,
                     load_end=tentative_load_end,
@@ -429,39 +314,29 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 )
                 if depart_time > DAY_DURATION_SECONDS:
                     continue
-                run_target = _target_chunk_size(accessible_metrics, container["color"])
-                same_company_bonus = 0.0
-                long_run_penalty = 0.0
-                if jobs and jobs[-1]["containerColor"] == container["color"]:
-                    if current_run_length < run_target:
-                        same_company_bonus = -42.0
-                    else:
-                        overflow = current_run_length - run_target + 1
-                        same_company_bonus = -12.0
-                        long_run_penalty = float(overflow * overflow) * LONG_RUN_CONTINUATION_PENALTY
-                company_switch_penalty = 0.0
-                if jobs and jobs[-1]["containerColor"] != container["color"]:
-                    previous_color = jobs[-1]["containerColor"]
-                    previous_run_target = _target_chunk_size(accessible_metrics, previous_color)
-                    company_switch_penalty += DAY_COMPANY_SWITCH_PENALTY
-                    if remaining_by_color.get(previous_color, 0) > 0:
-                        if current_run_length < previous_run_target:
-                            company_switch_penalty += EARLY_SWITCH_PENALTY
-                        else:
-                            company_switch_penalty += DAY_INCOMPLETE_COMPANY_SWITCH_PENALTY * 0.18
-                            if accessible_metrics.get(container["color"], {}).get("wavePotential", 0.0) >= 2.0:
-                                company_switch_penalty -= ALTERNATE_WAVE_SWITCH_BONUS
+                continuation_adjustment = _continuation_preference(
+                    color_name=container["color"],
+                    last_color=last_color,
+                    run_length=current_run_length,
+                    accessible_metrics=accessible_metrics,
+                    remaining_by_color=remaining_by_color,
+                )
+                progress_balance_adjustment = _progress_balance_adjustment(
+                    color_name=container["color"],
+                    last_color=last_color,
+                    accessible_metrics=accessible_metrics,
+                    scheduled_trips_by_color=scheduled_trips_by_color,
+                    total_by_color=total_by_color,
+                    total_jobs_scheduled=len(jobs),
+                )
                 # Optimize for crane efficiency first: expensive lengthwise crane movement
                 # is encoded in horizontal_weighted_cost (length axis weighted 10x).
                 score = (
                     depart_time
                     + lane_wait_seconds * 2.0
                     + horizontal_weighted_cost * DAY_ENERGY_WEIGHT
-                    + company_switch_penalty
-                    + phase_alignment_penalty
-                    + schedule_spread_penalty
-                    + same_company_bonus
-                    + long_run_penalty
+                    + continuation_adjustment
+                    + progress_balance_adjustment
                     + rng.random() * 0.001
                 )
                 if best_score is None or score < best_score:
@@ -518,8 +393,6 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
             company_trips[company] = 0
         company_trips[company] += 1
         remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) - 1
-        if remaining_by_color[color_name] <= 0:
-            active_group_color = None
         scheduled_trips_by_color[color_name] = scheduled_trips_by_color.get(color_name, 0) + 1
 
         lane_flow_free_at = arrival_time + TRUCK_FLOW_HEADWAY_SECONDS

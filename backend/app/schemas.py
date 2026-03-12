@@ -41,20 +41,21 @@ class SimulationSummary(BaseModel):
 
 class AlgorithmSettings(BaseModel):
     seed: int = 1
-    lam: float = 1.0
-    stackTopMismatchWeight: float = 1.1
-    stackRehandleWeight: float = 1.0
-    stackImpurityWeight: float = 1.4
-    buriedForeignWeight: float = 2.0
-    groupFragmentationWeight: float = 0.9
+    lam: float = 0.1
+    stackTopMismatchWeight: float = 1.8
+    stackTransitionWeight: float = 1.6
+    stackRehandleWeight: float = 1.4
+    stackImpurityWeight: float = 0.6
+    buriedForeignWeight: float = 2.6
+    groupFragmentationWeight: float = 0.1
     qualityTieEps: float = 1e-9
-    operationalWeight: float = 1.0
-    operationalNormalizer: float = 60.0
+    operationalWeight: float = 1.25
+    operationalNormalizer: float = 28.0
     nightBudget: float = 28800.0
-    energyWeight: float = 1.0
-    energyXCost: float = 10.0
+    energyWeight: float = 1.8
+    energyXCost: float = 14.0
     energyYCost: float = 1.0
-    energyZCost: float = 1.0
+    energyZCost: float = 1.1
     topGroups: int = 5
     srcLimit: int = 40
     dstLimit: int = 30
@@ -95,6 +96,7 @@ class AlgorithmSettingsPatch(BaseModel):
     seed: Optional[int] = None
     lam: Optional[float] = None
     stackTopMismatchWeight: Optional[float] = None
+    stackTransitionWeight: Optional[float] = None
     stackRehandleWeight: Optional[float] = None
     stackImpurityWeight: Optional[float] = None
     buriedForeignWeight: Optional[float] = None

@@ -66,19 +66,20 @@ def main() -> None:
     p.add_argument("--groups", type=int, default=8)
     p.add_argument("--per-group", type=int, default=15)
 
-    p.add_argument("--lambda", dest="lam", type=float, default=1.0)
-    p.add_argument("--stack-top-mismatch-weight", type=float, default=0.0)
-    p.add_argument("--stack-rehandle-weight", type=float, default=0.0)
-    p.add_argument("--stack-impurity-weight", type=float, default=0.0)
-    p.add_argument("--buried-foreign-weight", type=float, default=0.0)
-    p.add_argument("--group-fragmentation-weight", type=float, default=0.0)
+    p.add_argument("--lambda", dest="lam", type=float, default=0.1)
+    p.add_argument("--stack-top-mismatch-weight", type=float, default=1.8)
+    p.add_argument("--stack-transition-weight", type=float, default=1.6)
+    p.add_argument("--stack-rehandle-weight", type=float, default=1.4)
+    p.add_argument("--stack-impurity-weight", type=float, default=0.6)
+    p.add_argument("--buried-foreign-weight", type=float, default=2.6)
+    p.add_argument("--group-fragmentation-weight", type=float, default=0.1)
     p.add_argument("--quality-tie-eps", type=float, default=1e-9)
-    p.add_argument("--operational-weight", type=float, default=1.0)
-    p.add_argument("--operational-normalizer", type=float, default=60.0)
-    p.add_argument("--energy-weight", type=float, default=1.0)
-    p.add_argument("--energy-x-cost", type=float, default=10.0)
+    p.add_argument("--operational-weight", type=float, default=1.25)
+    p.add_argument("--operational-normalizer", type=float, default=28.0)
+    p.add_argument("--energy-weight", type=float, default=1.8)
+    p.add_argument("--energy-x-cost", type=float, default=14.0)
     p.add_argument("--energy-y-cost", type=float, default=1.0)
-    p.add_argument("--energy-z-cost", type=float, default=1.0)
+    p.add_argument("--energy-z-cost", type=float, default=1.1)
     p.add_argument("--night-budget", type=float, default=28800.0)
 
     p.add_argument("--top-groups", type=int, default=5)
@@ -127,6 +128,7 @@ def main() -> None:
         night_budget_s=args.night_budget,
         lam=args.lam,
         stack_top_mismatch_weight=args.stack_top_mismatch_weight,
+        stack_transition_weight=args.stack_transition_weight,
         stack_rehandle_weight=args.stack_rehandle_weight,
         stack_impurity_weight=args.stack_impurity_weight,
         buried_foreign_weight=args.buried_foreign_weight,

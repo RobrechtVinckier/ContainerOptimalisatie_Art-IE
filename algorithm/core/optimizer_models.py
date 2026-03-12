@@ -25,6 +25,7 @@ class Candidate:
     score: float
     delta_quality: float = 0.0
     delta_stack_top_mismatch: float = 0.0
+    delta_stack_transitions: float = 0.0
     delta_stack_rehandles: float = 0.0
     delta_stack_impurity: float = 0.0
     delta_buried_foreign: float = 0.0
@@ -39,22 +40,23 @@ class OptimizerConfig:
     seed: int = 0
 
     night_budget_s: float = 28800.0
-    lam: float = 1.0
-    # stack quality objective extension (set both to 0.0 for legacy behavior)
-    stack_top_mismatch_weight: float = 0.0
-    stack_rehandle_weight: float = 0.0
-    stack_impurity_weight: float = 0.0
-    buried_foreign_weight: float = 0.0
-    group_fragmentation_weight: float = 0.0
+    lam: float = 0.1
+    # stack-flow objective terms
+    stack_top_mismatch_weight: float = 1.8
+    stack_transition_weight: float = 1.6
+    stack_rehandle_weight: float = 1.4
+    stack_impurity_weight: float = 0.6
+    buried_foreign_weight: float = 2.6
+    group_fragmentation_weight: float = 0.1
     # secondary operational comparator for near-equal quality
     quality_tie_eps: float = 1e-9
-    operational_weight: float = 1.0
+    operational_weight: float = 1.25
     # scale operational score before combining with quality in primary ranking
-    operational_normalizer: float = 60.0
-    energy_weight: float = 1.0
-    energy_x_cost: float = 10.0
+    operational_normalizer: float = 28.0
+    energy_weight: float = 1.8
+    energy_x_cost: float = 14.0
     energy_y_cost: float = 1.0
-    energy_z_cost: float = 1.0
+    energy_z_cost: float = 1.1
 
     # candidate generation controls
     top_groups: int = 5

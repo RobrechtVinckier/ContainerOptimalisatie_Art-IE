@@ -49,6 +49,7 @@ def optimizer_config(settings: schemas.AlgorithmSettings) -> OptimizerConfig:
         seed=settings.seed,
         lam=settings.lam,
         stack_top_mismatch_weight=settings.stackTopMismatchWeight,
+        stack_transition_weight=settings.stackTransitionWeight,
         stack_rehandle_weight=settings.stackRehandleWeight,
         stack_impurity_weight=settings.stackImpurityWeight,
         buried_foreign_weight=settings.buriedForeignWeight,

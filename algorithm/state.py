@@ -3,7 +3,7 @@
 3D Yard Night Rehandling Simulator (Python 3.11, no external services)
 
 Files in this mini-project:
-- state.py        : data model + fast clustering cost + move apply + delta cost
+- state.py        : data model + fast structural-cost deltas + move apply
 - optimizer.py    : greedy planner + tabu improver
 - main.py         : CLI runner (random instance -> plan -> print summary)
 - tests/test_delta.py : unit tests (constraints + delta correctness)
@@ -14,15 +14,18 @@ Problem summary
 - Only the TOP container of a stack can be moved.
 - Crane time is horizontal travel only:
     T(a->b) = 2*|dx| + 0.5*|dy|  (vX=0.5m/s, vY=2m/s, spacing=1m)
-- Objective: clustering without fixed zones:
-    Spread(g) = 2*(xmax-xmin) + 0.5*(ymax-ymin)
-    ClusterCost = sum_g Spread(g)
+- Objective: low-cost stack preparation for daytime extraction waves:
+    Primary terms penalize broken top runs, stack transitions, rehandles,
+    buried foreign blockers, and other stack-flow issues.
+    A minor secondary spread term remains to avoid completely scattering one
+    company across the yard, but yard-wide clustering is no longer dominant.
 - Planner chooses moves until the 8h night budget is exhausted or no useful moves.
 
 Engineering notes
 -----------------
 - Deterministic: random seed controls instance generation and tie-breaking.
-- Robust delta: delta_cluster_cost_for_move uses safe O(X+Y) scan with virtual counts.
+- Robust deltas: delta_cluster_cost_for_move uses safe O(X+Y) scan with
+  virtual counts, and stack-quality deltas are evaluated locally per move.
 - No global state; everything lives in a State object.
 
 Run
@@ -131,15 +134,37 @@ class State:
 
     @staticmethod
     def _stack_top_group_mismatch_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
-        """Penalty for top group being incompatible with the stack composition."""
+        """
+        Penalty for a short top-access run.
+
+        The accessible company wave is the contiguous run of same-group containers
+        from the top downward. Short runs are operationally bad because they force
+        immediate company switching during the day.
+        """
         if not stack:
             return 0.0
         top_group = group[stack[-1]]
-        mismatch = 0
-        for cid in stack:
+        top_run = 0
+        for cid in reversed(stack):
             if group[cid] != top_group:
-                mismatch += 1
-        return float(mismatch)
+                break
+            top_run += 1
+        return float(len(stack) - top_run)
+
+    @staticmethod
+    def _stack_group_transitions_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
+        """Penalty for company switching down the stack from top to bottom."""
+        n = len(stack)
+        if n <= 1:
+            return 0.0
+        transitions = 0
+        prev_group = group[stack[-1]]
+        for idx in range(n - 2, -1, -1):
+            current_group = group[stack[idx]]
+            if current_group != prev_group:
+                transitions += 1
+            prev_group = current_group
+        return float(transitions)
 
     @staticmethod
     def _stack_expected_rehandles_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
@@ -192,6 +217,9 @@ class State:
     def stack_expected_rehandles_penalty(self, xy: XY) -> float:
         return self._stack_expected_rehandles_from_stack(self.stack(xy), self.group)
 
+    def stack_group_transition_penalty(self, xy: XY) -> float:
+        return self._stack_group_transitions_from_stack(self.stack(xy), self.group)
+
     def stack_impurity_penalty(self, xy: XY) -> float:
         return self._stack_impurity_from_stack(self.stack(xy), self.group)
 
@@ -202,17 +230,20 @@ class State:
         self,
         xy: XY,
         top_mismatch_weight: float = 1.0,
+        transition_weight: float = 0.0,
         rehandle_weight: float = 1.0,
         impurity_weight: float = 0.0,
         buried_foreign_weight: float = 0.0,
     ) -> float:
         """Weighted stack-quality penalty for one stack."""
         top_penalty = self.stack_top_group_mismatch_penalty(xy)
+        transition_penalty = self.stack_group_transition_penalty(xy)
         rehandle_penalty = self.stack_expected_rehandles_penalty(xy)
         impurity_penalty = self.stack_impurity_penalty(xy)
         buried_penalty = self.stack_buried_foreign_penalty(xy)
         return (
             top_mismatch_weight * top_penalty
+            + transition_weight * transition_penalty
             + rehandle_weight * rehandle_penalty
             + impurity_weight * impurity_penalty
             + buried_foreign_weight * buried_penalty
@@ -221,6 +252,7 @@ class State:
     def total_stack_quality_cost(
         self,
         top_mismatch_weight: float = 1.0,
+        transition_weight: float = 0.0,
         rehandle_weight: float = 1.0,
         impurity_weight: float = 0.0,
         buried_foreign_weight: float = 0.0,
@@ -232,6 +264,7 @@ class State:
                 total += self.stack_quality_penalty(
                     (x, y),
                     top_mismatch_weight=top_mismatch_weight,
+                    transition_weight=transition_weight,
                     rehandle_weight=rehandle_weight,
                     impurity_weight=impurity_weight,
                     buried_foreign_weight=buried_foreign_weight,
@@ -400,6 +433,7 @@ class State:
         dst: XY,
         *,
         top_mismatch_weight: float = 1.0,
+        transition_weight: float = 0.0,
         rehandle_weight: float = 1.0,
         impurity_weight: float = 0.0,
         buried_foreign_weight: float = 0.0,
@@ -422,10 +456,12 @@ class State:
             container_id = moved_cid
 
         before = self._stack_top_group_mismatch_from_stack(src_stack, self.group) * top_mismatch_weight
+        before += self._stack_group_transitions_from_stack(src_stack, self.group) * transition_weight
         before += self._stack_expected_rehandles_from_stack(src_stack, self.group) * rehandle_weight
         before += self._stack_impurity_from_stack(src_stack, self.group) * impurity_weight
         before += self._stack_buried_foreign_from_stack(src_stack, self.group) * buried_foreign_weight
         before += self._stack_top_group_mismatch_from_stack(dst_stack, self.group) * top_mismatch_weight
+        before += self._stack_group_transitions_from_stack(dst_stack, self.group) * transition_weight
         before += self._stack_expected_rehandles_from_stack(dst_stack, self.group) * rehandle_weight
         before += self._stack_impurity_from_stack(dst_stack, self.group) * impurity_weight
         before += self._stack_buried_foreign_from_stack(dst_stack, self.group) * buried_foreign_weight
@@ -435,10 +471,12 @@ class State:
         virtual_dst.append(container_id)
 
         after = self._stack_top_group_mismatch_from_stack(virtual_src, self.group) * top_mismatch_weight
+        after += self._stack_group_transitions_from_stack(virtual_src, self.group) * transition_weight
         after += self._stack_expected_rehandles_from_stack(virtual_src, self.group) * rehandle_weight
         after += self._stack_impurity_from_stack(virtual_src, self.group) * impurity_weight
         after += self._stack_buried_foreign_from_stack(virtual_src, self.group) * buried_foreign_weight
         after += self._stack_top_group_mismatch_from_stack(virtual_dst, self.group) * top_mismatch_weight
+        after += self._stack_group_transitions_from_stack(virtual_dst, self.group) * transition_weight
         after += self._stack_expected_rehandles_from_stack(virtual_dst, self.group) * rehandle_weight
         after += self._stack_impurity_from_stack(virtual_dst, self.group) * impurity_weight
         after += self._stack_buried_foreign_from_stack(virtual_dst, self.group) * buried_foreign_weight

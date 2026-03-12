@@ -82,9 +82,9 @@ def _destination_group_preference(state: State, group_index: int, dst: XY) -> in
 def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Optional[int] = None) -> List[Candidate]:
     """
     Candidate restriction:
-    a) pick groups with largest spread
-    b) pick source stacks whose top container is in those groups
-    c) pick destination stacks with free capacity near group center (x and optional y radius)
+    a) focus source stacks with the worst accessible stack-flow structure
+    b) keep destinations local to the source to avoid unnecessary crane motion
+    c) prefer moves that improve stack accessibility before any global layout compaction
     """
     g_count = state.num_groups()
     if g_count <= 0:
@@ -92,11 +92,30 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
 
     expensive_axis = _dominant_expensive_axis(cfg)
 
-    # pick largest-spread groups (deterministic tie-break by group id)
-    group_order = sorted(range(g_count), key=lambda g: (-state.group_spread(g), g))
+    group_pressure = [0.0 for _ in range(g_count)]
+    for x in range(state.X):
+        for y in range(state.Y):
+            top = state.top((x, y))
+            if top is None:
+                continue
+            group_index = state.group[top]
+            top_access = state.stack_top_group_mismatch_penalty((x, y))
+            transitions = state.stack_group_transition_penalty((x, y))
+            rehandles = state.stack_expected_rehandles_penalty((x, y))
+            impurity = state.stack_impurity_penalty((x, y))
+            buried = state.stack_buried_foreign_penalty((x, y))
+            group_pressure[group_index] += (
+                cfg.stack_top_mismatch_weight * top_access
+                + cfg.stack_transition_weight * transitions
+                + cfg.stack_rehandle_weight * rehandles
+                + cfg.stack_impurity_weight * impurity
+                + cfg.buried_foreign_weight * buried
+            )
+
+    group_order = sorted(range(g_count), key=lambda g: (-group_pressure[g], g))
     focus_groups = set(group_order[: min(cfg.top_groups, g_count)])
 
-    # enumerate source stacks with top container in focus group
+    # Enumerate source stacks with high accessible flow pressure.
     src_records: List[Tuple[Tuple[float, ...], XY]] = []
     for x in range(state.X):
         for y in range(state.Y):
@@ -107,14 +126,18 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             if group_index not in focus_groups:
                 continue
 
-            # Bound containers are most likely to reduce spread when moved.
-            on_boundary = state.is_on_group_boundary(top, (x, y))
-            cx, cy = state.group_center(group_index)
-            center_x = int(round(cx))
-            center_y = int(round(cy))
-            dist_from_center = 2.0 * abs(x - center_x) + 0.5 * abs(y - center_y)
+            top_access = state.stack_top_group_mismatch_penalty((x, y))
+            transitions = state.stack_group_transition_penalty((x, y))
             impurity = state.stack_impurity_penalty((x, y))
+            rehandles = state.stack_expected_rehandles_penalty((x, y))
             buried = state.stack_buried_foreign_penalty((x, y))
+            structural_pressure = (
+                cfg.stack_top_mismatch_weight * top_access
+                + cfg.stack_transition_weight * transitions
+                + cfg.stack_rehandle_weight * rehandles
+                + cfg.stack_impurity_weight * impurity
+                + cfg.buried_foreign_weight * buried
+            )
             crane_axis_delta = _axis_delta(state.crane_pos, (x, y), expensive_axis)
             if cfg.max_expensive_axis_src_delta > 0 and crane_axis_delta > cfg.max_expensive_axis_src_delta:
                 continue
@@ -122,17 +145,18 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             priority = (
                 crane_axis_delta,
                 crane_reposition,
-                0.0 if on_boundary else 1.0,
-                -state.group_spread(group_index),
+                -structural_pressure,
                 -buried,
+                -rehandles,
+                -transitions,
+                -top_access,
                 -impurity,
-                -dist_from_center,
                 x,
                 y,
             )
             src_records.append((priority, (x, y)))
 
-    # deterministic source ordering: boundaries first, then spread and distance.
+    # deterministic source ordering: cheap crane motion first, then worst stack issues.
     src_records.sort(key=lambda item: item[0])
     srcs = [xy for _priority, xy in src_records]
     srcs = srcs[: cfg.src_limit]
@@ -150,23 +174,18 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
         if cid is None:
             continue
         group_index = state.group[cid]
-        cx, cy = state.group_center(group_index)
-        center_x = int(round(cx))
-        center_y = int(round(cy))
 
-        # prefer destinations near group center and compatible stacks.
+        # Keep destinations local to the current source rather than chasing a group center.
         local_dsts = [
             xy
             for xy in free
             if xy != src
-            and abs(xy[0] - center_x) <= cfg.x_radius
-            and (not cfg.y_aware or abs(xy[1] - center_y) <= cfg.y_radius)
+            and abs(xy[0] - src[0]) <= cfg.x_radius
+            and (not cfg.y_aware or abs(xy[1] - src[1]) <= cfg.y_radius)
         ]
         if not local_dsts and cfg.y_aware:
-            # fallback when y filter is too strict
-            local_dsts = [xy for xy in free if xy != src and abs(xy[0] - center_x) <= cfg.x_radius]
+            local_dsts = [xy for xy in free if xy != src and abs(xy[0] - src[0]) <= cfg.x_radius]
         if not local_dsts:
-            # robust fallback: keep search alive even when local radius is saturated
             local_dsts = [xy for xy in free if xy != src]
         if cfg.max_expensive_axis_move_delta > 0:
             local_dsts = [
@@ -178,20 +197,20 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             continue
         local_dsts.sort(
             key=lambda dst: (
-                _destination_group_preference(state, group_index, dst),
                 _axis_delta(src, dst, expensive_axis),
                 state.move_time(src, dst) + cfg.energy_weight * _move_energy_cost(state, src, dst, cfg),
-                2.0 * abs(dst[0] - center_x) + 0.5 * abs(dst[1] - center_y),
-                state.stack_compatibility_penalty_for_group(group_index, dst),
                 state.delta_stack_quality_for_move(
                     cid,
                     src,
                     dst,
                     top_mismatch_weight=cfg.stack_top_mismatch_weight,
+                    transition_weight=cfg.stack_transition_weight,
                     rehandle_weight=cfg.stack_rehandle_weight,
                     impurity_weight=cfg.stack_impurity_weight,
                     buried_foreign_weight=cfg.buried_foreign_weight,
                 ),
+                state.stack_compatibility_penalty_for_group(group_index, dst),
+                _destination_group_preference(state, group_index, dst),
                 travel_time(src, dst),
                 dst[0],
                 dst[1],
@@ -224,6 +243,15 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                 src,
                 dst,
                 top_mismatch_weight=1.0,
+                transition_weight=0.0,
+                rehandle_weight=0.0,
+            )
+            dtrans = state.delta_stack_quality_for_move(
+                cid,
+                src,
+                dst,
+                top_mismatch_weight=0.0,
+                transition_weight=1.0,
                 rehandle_weight=0.0,
             )
             dreh = state.delta_stack_quality_for_move(
@@ -231,6 +259,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                 src,
                 dst,
                 top_mismatch_weight=0.0,
+                transition_weight=0.0,
                 rehandle_weight=1.0,
             )
             dimp = state.delta_stack_quality_for_move(
@@ -238,6 +267,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                 src,
                 dst,
                 top_mismatch_weight=0.0,
+                transition_weight=0.0,
                 rehandle_weight=0.0,
                 impurity_weight=1.0,
                 buried_foreign_weight=0.0,
@@ -247,6 +277,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                 src,
                 dst,
                 top_mismatch_weight=0.0,
+                transition_weight=0.0,
                 rehandle_weight=0.0,
                 impurity_weight=0.0,
                 buried_foreign_weight=1.0,
@@ -254,6 +285,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             dfrag = state.delta_group_fragmentation_for_move(cid, src, dst)
             dstack = (
                 cfg.stack_top_mismatch_weight * dtop
+                + cfg.stack_transition_weight * dtrans
                 + cfg.stack_rehandle_weight * dreh
                 + cfg.stack_impurity_weight * dimp
                 + cfg.buried_foreign_weight * dbury
@@ -261,7 +293,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             dquality = cfg.lam * dcl + dstack + cfg.group_fragmentation_weight * dfrag
             de = _move_energy_cost(state, src, dst, cfg)
             expensive_axis_travel = _axis_delta(state.crane_pos, src, expensive_axis) + _axis_delta(src, dst, expensive_axis)
-            expensive_axis_penalty = max(cfg.energy_x_cost, cfg.energy_y_cost) * float(expensive_axis_travel ** 2) * 0.15
+            expensive_axis_penalty = max(cfg.energy_x_cost, cfg.energy_y_cost) * float(expensive_axis_travel ** 2) * 0.45
             operational = cfg.operational_weight * (dt + cfg.energy_weight * de + expensive_axis_penalty)
             score = dquality + operational
             candidates.append(
@@ -275,6 +307,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                     score,
                     delta_quality=dquality,
                     delta_stack_top_mismatch=dtop,
+                    delta_stack_transitions=dtrans,
                     delta_stack_rehandles=dreh,
                     delta_stack_impurity=dimp,
                     delta_buried_foreign=dbury,

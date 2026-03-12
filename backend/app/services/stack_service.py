@@ -87,12 +87,13 @@ def target_color_for_slot(x: int, z: int) -> str:
 
 
 DEFAULT_PLACEMENT_SCORE_WEIGHTS = {
-    "cluster": 1.0,
-    "top_mismatch": 1.1,
-    "rehandles": 1.0,
-    "impurity": 1.4,
-    "buried_foreign": 2.0,
-    "fragmentation": 0.9,
+    "cluster": 0.1,
+    "top_mismatch": 1.8,
+    "transitions": 1.6,
+    "rehandles": 1.4,
+    "impurity": 0.6,
+    "buried_foreign": 2.6,
+    "fragmentation": 0.1,
 }
 
 
@@ -114,8 +115,9 @@ def placement_score_weights_from_algorithm_settings(settings: object | None) -> 
         return dict(DEFAULT_PLACEMENT_SCORE_WEIGHTS)
     return resolve_placement_score_weights(
         {
-            "cluster": 1.0,
+            "cluster": getattr(settings, "lam", DEFAULT_PLACEMENT_SCORE_WEIGHTS["cluster"]),
             "top_mismatch": getattr(settings, "stackTopMismatchWeight", DEFAULT_PLACEMENT_SCORE_WEIGHTS["top_mismatch"]),
+            "transitions": getattr(settings, "stackTransitionWeight", DEFAULT_PLACEMENT_SCORE_WEIGHTS["transitions"]),
             "rehandles": getattr(settings, "stackRehandleWeight", DEFAULT_PLACEMENT_SCORE_WEIGHTS["rehandles"]),
             "impurity": getattr(settings, "stackImpurityWeight", DEFAULT_PLACEMENT_SCORE_WEIGHTS["impurity"]),
             "buried_foreign": getattr(settings, "buriedForeignWeight", DEFAULT_PLACEMENT_SCORE_WEIGHTS["buried_foreign"]),
@@ -129,6 +131,7 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
     resolved_weights = resolve_placement_score_weights(score_weights)
     w_cluster = resolved_weights["cluster"]
     w_top_mismatch = resolved_weights["top_mismatch"]
+    w_transitions = resolved_weights["transitions"]
     w_rehandles = resolved_weights["rehandles"]
     w_impurity = resolved_weights["impurity"]
     w_buried_foreign = resolved_weights["buried_foreign"]
@@ -140,10 +143,12 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
     color_stack_occupancy: dict[str, int] = {}
     total = 0
     top_mismatch_penalty = 0.0
+    transition_penalty = 0.0
     rehandles_penalty = 0.0
     impurity_penalty = 0.0
     buried_foreign_penalty = 0.0
     max_top_mismatch = 0.0
+    max_transitions = 0.0
     max_rehandles = 0.0
     max_impurity = 0.0
     max_buried_foreign = 0.0
@@ -160,9 +165,15 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
                     counts_in_stack[color_name] = counts_in_stack.get(color_name, 0) + 1
                     colors_seen.add(color_name)
                 top_color = stack[-1]["color"]
-                top_mismatch_penalty += float(n - counts_in_stack.get(top_color, 0))
+                top_run = 0
+                for container in reversed(stack):
+                    if container["color"] != top_color:
+                        break
+                    top_run += 1
+                top_mismatch_penalty += float(n - top_run)
                 impurity_penalty += float(n - max(counts_in_stack.values()))
                 max_top_mismatch += float(max(0, n - 1))
+                max_transitions += float(max(0, n - 1))
                 max_impurity += float(max(0, n - 1))
 
                 for color_name in colors_seen:
@@ -176,6 +187,9 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
                         if stack[upper_idx]["color"] != lower_color:
                             rehandles_penalty += 1.0
                             buried_foreign_penalty += float(upper_idx - lower_idx)
+                for idx in range(n - 1, 0, -1):
+                    if stack[idx]["color"] != stack[idx - 1]["color"]:
+                        transition_penalty += 1.0
 
             for container in stack:
                 color_name = container["color"]
@@ -225,6 +239,7 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
     max_cluster_cost = active_groups * max_spread_per_group
     norm_cluster = (cluster_cost / max_cluster_cost) if max_cluster_cost > 0 else 0.0
     norm_top = (top_mismatch_penalty / max_top_mismatch) if max_top_mismatch > 0 else 0.0
+    norm_transitions = (transition_penalty / max_transitions) if max_transitions > 0 else 0.0
     norm_rehandles = (rehandles_penalty / max_rehandles) if max_rehandles > 0 else 0.0
     norm_impurity = (impurity_penalty / max_impurity) if max_impurity > 0 else 0.0
     norm_buried = (buried_foreign_penalty / max_buried_foreign) if max_buried_foreign > 0 else 0.0
@@ -233,12 +248,21 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
     weighted_norm = (
         w_cluster * norm_cluster
         + w_top_mismatch * norm_top
+        + w_transitions * norm_transitions
         + w_rehandles * norm_rehandles
         + w_impurity * norm_impurity
         + w_buried_foreign * norm_buried
         + w_fragmentation * norm_fragmentation
     )
-    weight_total = w_cluster + w_top_mismatch + w_rehandles + w_impurity + w_buried_foreign + w_fragmentation
+    weight_total = (
+        w_cluster
+        + w_top_mismatch
+        + w_transitions
+        + w_rehandles
+        + w_impurity
+        + w_buried_foreign
+        + w_fragmentation
+    )
     if weight_total <= 0:
         score = 1.0
     else:

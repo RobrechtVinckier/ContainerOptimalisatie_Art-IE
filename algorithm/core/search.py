@@ -26,10 +26,11 @@ class _EliteEntry:
 
 
 def _objective_cost(state: State, cfg: OptimizerConfig) -> float:
-    """Global objective used by search: spread + stack-quality penalties."""
+    """Global objective used by search: low-cost stack flow with minor layout pressure."""
     cluster = cfg.lam * state.cluster_cost()
     stack_quality = state.total_stack_quality_cost(
         top_mismatch_weight=cfg.stack_top_mismatch_weight,
+        transition_weight=cfg.stack_transition_weight,
         rehandle_weight=cfg.stack_rehandle_weight,
         impurity_weight=cfg.stack_impurity_weight,
         buried_foreign_weight=cfg.buried_foreign_weight,
@@ -82,6 +83,7 @@ def _candidate_structural(candidate: Candidate, cfg: OptimizerConfig) -> float:
     """Stack-structure-specific part of quality (group purity / burial / fragmentation)."""
     return (
         cfg.stack_top_mismatch_weight * candidate.delta_stack_top_mismatch
+        + cfg.stack_transition_weight * candidate.delta_stack_transitions
         + cfg.stack_rehandle_weight * candidate.delta_stack_rehandles
         + cfg.stack_impurity_weight * candidate.delta_stack_impurity
         + cfg.buried_foreign_weight * candidate.delta_buried_foreign
@@ -422,6 +424,7 @@ def _rank_candidates(
                     candidate.score,
                     delta_quality=candidate.delta_quality,
                     delta_stack_top_mismatch=candidate.delta_stack_top_mismatch,
+                    delta_stack_transitions=candidate.delta_stack_transitions,
                     delta_stack_rehandles=candidate.delta_stack_rehandles,
                     delta_stack_impurity=candidate.delta_stack_impurity,
                     delta_buried_foreign=candidate.delta_buried_foreign,

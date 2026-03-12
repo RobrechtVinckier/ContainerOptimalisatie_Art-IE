@@ -13,12 +13,13 @@ export const YARD_CONFIG = Object.freeze({
 });
 
 const DEFAULT_PLACEMENT_SCORE_WEIGHTS = Object.freeze({
-  cluster: 1,
-  topMismatch: 1.1,
-  rehandles: 1,
-  impurity: 1.4,
-  buriedForeign: 2,
-  fragmentation: 0.9,
+  cluster: 0.1,
+  topMismatch: 1.8,
+  transitions: 1.6,
+  rehandles: 1.4,
+  impurity: 0.6,
+  buriedForeign: 2.6,
+  fragmentation: 0.1,
 });
 
 export const COLOR_PALETTE = Object.freeze({
@@ -123,6 +124,7 @@ function resolvePlacementScoreWeights(weights) {
   }
   resolved.cluster = nonNegativeNumber(weights.cluster, resolved.cluster);
   resolved.topMismatch = nonNegativeNumber(weights.topMismatch, resolved.topMismatch);
+  resolved.transitions = nonNegativeNumber(weights.transitions, resolved.transitions);
   resolved.rehandles = nonNegativeNumber(weights.rehandles, resolved.rehandles);
   resolved.impurity = nonNegativeNumber(weights.impurity, resolved.impurity);
   resolved.buriedForeign = nonNegativeNumber(weights.buriedForeign, resolved.buriedForeign);
@@ -135,8 +137,9 @@ export function placementScoreWeightsFromAlgorithmSettings(settings) {
     return null;
   }
   return resolvePlacementScoreWeights({
-    cluster: 1,
+    cluster: settings.lam ?? DEFAULT_PLACEMENT_SCORE_WEIGHTS.cluster,
     topMismatch: settings.stackTopMismatchWeight ?? DEFAULT_PLACEMENT_SCORE_WEIGHTS.topMismatch,
+    transitions: settings.stackTransitionWeight ?? DEFAULT_PLACEMENT_SCORE_WEIGHTS.transitions,
     rehandles: settings.stackRehandleWeight ?? DEFAULT_PLACEMENT_SCORE_WEIGHTS.rehandles,
     impurity: settings.stackImpurityWeight ?? DEFAULT_PLACEMENT_SCORE_WEIGHTS.impurity,
     buriedForeign: settings.buriedForeignWeight ?? DEFAULT_PLACEMENT_SCORE_WEIGHTS.buriedForeign,
@@ -148,6 +151,7 @@ export function summarizeStacks(stacks, scoreWeights = null) {
   const resolvedWeights = resolvePlacementScoreWeights(scoreWeights);
   const wCluster = resolvedWeights.cluster;
   const wTopMismatch = resolvedWeights.topMismatch;
+  const wTransitions = resolvedWeights.transitions;
   const wRehandles = resolvedWeights.rehandles;
   const wImpurity = resolvedWeights.impurity;
   const wBuriedForeign = resolvedWeights.buriedForeign;
@@ -158,10 +162,12 @@ export function summarizeStacks(stacks, scoreWeights = null) {
   const colorStackOccupancy = {};
   let total = 0;
   let topMismatchPenalty = 0;
+  let transitionPenalty = 0;
   let rehandlesPenalty = 0;
   let impurityPenalty = 0;
   let buriedForeignPenalty = 0;
   let maxTopMismatch = 0;
+  let maxTransitions = 0;
   let maxRehandles = 0;
   let maxImpurity = 0;
   let maxBuriedForeign = 0;
@@ -179,9 +185,17 @@ export function summarizeStacks(stacks, scoreWeights = null) {
           colorsSeen.add(colorName);
         }
         const topColor = stack[n - 1].color;
-        topMismatchPenalty += n - (countsInStack[topColor] || 0);
+        let topRun = 0;
+        for (let idx = n - 1; idx >= 0; idx -= 1) {
+          if (stack[idx].color !== topColor) {
+            break;
+          }
+          topRun += 1;
+        }
+        topMismatchPenalty += n - topRun;
         impurityPenalty += n - Math.max(...Object.values(countsInStack));
         maxTopMismatch += Math.max(0, n - 1);
+        maxTransitions += Math.max(0, n - 1);
         maxImpurity += Math.max(0, n - 1);
         maxRehandles += (n * (n - 1)) / 2;
         maxBuriedForeign += (n * (n - 1) * (n + 1)) / 6;
@@ -197,6 +211,11 @@ export function summarizeStacks(stacks, scoreWeights = null) {
               rehandlesPenalty += 1;
               buriedForeignPenalty += (upper - lower);
             }
+          }
+        }
+        for (let idx = n - 1; idx > 0; idx -= 1) {
+          if (stack[idx].color !== stack[idx - 1].color) {
+            transitionPenalty += 1;
           }
         }
       }
@@ -260,6 +279,7 @@ export function summarizeStacks(stacks, scoreWeights = null) {
   const maxClusterCost = activeGroups * maxSpreadPerGroup;
   const normCluster = maxClusterCost > 0 ? (clusterCost / maxClusterCost) : 0;
   const normTop = maxTopMismatch > 0 ? (topMismatchPenalty / maxTopMismatch) : 0;
+  const normTransitions = maxTransitions > 0 ? (transitionPenalty / maxTransitions) : 0;
   const normRehandles = maxRehandles > 0 ? (rehandlesPenalty / maxRehandles) : 0;
   const normImpurity = maxImpurity > 0 ? (impurityPenalty / maxImpurity) : 0;
   const normBuried = maxBuriedForeign > 0 ? (buriedForeignPenalty / maxBuriedForeign) : 0;
@@ -268,12 +288,13 @@ export function summarizeStacks(stacks, scoreWeights = null) {
   const weightedNorm = (
     wCluster * normCluster
     + wTopMismatch * normTop
+    + wTransitions * normTransitions
     + wRehandles * normRehandles
     + wImpurity * normImpurity
     + wBuriedForeign * normBuried
     + wFragmentation * normFragmentation
   );
-  const weightTotal = wCluster + wTopMismatch + wRehandles + wImpurity + wBuriedForeign + wFragmentation;
+  const weightTotal = wCluster + wTopMismatch + wTransitions + wRehandles + wImpurity + wBuriedForeign + wFragmentation;
   const placementScore = weightTotal <= 0
     ? 1
     : Math.max(0, Math.min(1, 1 - (weightedNorm / weightTotal)));

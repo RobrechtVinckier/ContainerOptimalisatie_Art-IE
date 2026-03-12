@@ -2062,7 +2062,7 @@ async function runDayCycle(dayCycle, token) {
   runtime.hooks = createDayRuntimeHooks(runtime);
 
   state.dayRuntime = runtime;
-  refs.statusText.textContent = `Running day schedule in stable demo mode (${jobs.length} truck jobs)...`;
+  refs.statusText.textContent = `Running day schedule in simple sequential demo mode (${jobs.length} truck jobs)...`;
   syncDayRuntimeVisuals(runtime);
 
   await waitForSimulationStep(token, () => {

@@ -175,73 +175,8 @@ function getLaneActors(runtime) {
     });
 }
 
-function getVisibleActors(runtime) {
-  return runtime.truckActors.filter((actor) => actor.visible && actor.phase !== DAY_TRUCK_PHASES.finished);
-}
-
-function noteActorProgress(actor, time, startX, startZ) {
-  const moved = Math.abs(actor.x - startX) > 0.03 || Math.abs(actor.z - startZ) > 0.03;
-  if (moved) {
-    actor.lastProgressAt = time;
-  }
-}
-
-function actorIdleSeconds(actor, time) {
-  return Math.max(0, time - Math.max(actor.phaseChangedAt, actor.lastProgressAt));
-}
-
-function laneClearances(runtime, zCenter, ignoredActor = null) {
-  let ahead = Number.POSITIVE_INFINITY;
-  let behind = Number.POSITIVE_INFINITY;
-  for (const actor of runtime.truckActors) {
-    if (actor === ignoredActor || !actor.visible || !PHASES_USING_LANE.has(actor.phase)) {
-      continue;
-    }
-    if (actor.z >= zCenter) {
-      ahead = Math.min(ahead, actor.z - zCenter);
-    } else {
-      behind = Math.min(behind, zCenter - actor.z);
-    }
-  }
-  return { ahead, behind };
-}
-
-function canEnterRoad(runtime) {
-  const minZ = runtime.layout.entryZ + runtime.road.entrySpacing;
-  return runtime.truckActors.every((actor) => {
-    if (!actor.visible || !PHASES_USING_LANE.has(actor.phase)) {
-      return true;
-    }
-    return actor.z >= minZ;
-  });
-}
-
-function shouldDispatchActor(runtime, actor, time) {
-  if (time + 1e-6 >= actor.job.arrivalTime) {
-    return true;
-  }
-
-  const visibleActors = getVisibleActors(runtime);
-  if (visibleActors.length >= runtime.road.maxVisibleTrucks) {
-    return false;
-  }
-
-  const previewTime = actor.job.arrivalTime - runtime.road.dispatchLookaheadSeconds;
-  if (time + 1e-6 < previewTime) {
-    return false;
-  }
-
-  if (!visibleActors.length) {
-    return true;
-  }
-
-  const highActivityPhases = new Set([
-    DAY_TRUCK_PHASES.waiting,
-    DAY_TRUCK_PHASES.loading,
-    DAY_TRUCK_PHASES.loaded,
-  ]);
-  const highActivityVisible = visibleActors.some((visibleActor) => highActivityPhases.has(visibleActor.phase));
-  return highActivityVisible || visibleActors.length < runtime.road.preferredVisibleTrucks;
+function hasVisibleTruck(runtime) {
+  return runtime.truckActors.some((actor) => actor.visible && actor.phase !== DAY_TRUCK_PHASES.finished);
 }
 
 function bayOccupantConflict(runtime, actor) {
@@ -253,185 +188,30 @@ function bayOccupantConflict(runtime, actor) {
   });
 }
 
-function laneWindowClear(runtime, zCenter, behindDistance, aheadDistance, ignoredActor = null) {
-  return runtime.truckActors.every((actor) => {
-    if (actor === ignoredActor || !actor.visible || !PHASES_USING_LANE.has(actor.phase)) {
-      return true;
-    }
-    if (actor.z >= zCenter) {
-      return actor.z - zCenter >= aheadDistance;
-    }
-    return zCenter - actor.z >= behindDistance;
-  });
-}
-
-function canStartParking(runtime, actor) {
-  if (bayOccupantConflict(runtime, actor)) {
-    return false;
+function nextScheduledActor(runtime) {
+  const hinted = runtime.truckActors[runtime.schedule.nextJobIndex] || null;
+  if (hinted && hinted.phase === DAY_TRUCK_PHASES.scheduled) {
+    return hinted;
   }
-
-  if (laneWindowClear(runtime, actor.slotZ, runtime.road.stopDistance, runtime.road.stopDistance * 0.7, actor)) {
-    return true;
-  }
-
-  if (actorIdleSeconds(actor, runtime.currentSimTime) < runtime.road.stuckTimeoutSeconds) {
-    return false;
-  }
-
-  const { ahead, behind } = laneClearances(runtime, actor.slotZ, actor);
-  return ahead >= runtime.road.parkingPriorityStopDistance && behind >= runtime.road.parkingPriorityStopDistance;
-}
-
-function canStartMergeOut(runtime, actor) {
-  if (laneWindowClear(runtime, actor.slotZ, runtime.road.mergeClearanceBehind, runtime.road.mergeClearanceAhead, actor)) {
-    return true;
-  }
-
-  if (actorIdleSeconds(actor, runtime.currentSimTime) < runtime.road.stuckTimeoutSeconds) {
-    return false;
-  }
-
-  const { ahead, behind } = laneClearances(runtime, actor.slotZ, actor);
-  return ahead >= runtime.road.mergePriorityStopDistance && behind >= runtime.road.mergePriorityStopDistance;
+  return runtime.truckActors.find((actor) => actor.phase === DAY_TRUCK_PHASES.scheduled) || null;
 }
 
 function spawnReadyTrucks(runtime, time, hooks) {
-  for (const actor of runtime.truckActors) {
-    if (actor.phase !== DAY_TRUCK_PHASES.scheduled) {
-      continue;
-    }
-    if (!shouldDispatchActor(runtime, actor, time)) {
-      continue;
-    }
-    if (bayOccupantConflict(runtime, actor)) {
-      break;
-    }
-    actor.visible = true;
-    actor.x = runtime.layout.parkingLaneX;
-    actor.z = actor.slotZ;
-    actor.heading = 0;
-    actor.speed = 0;
-    actor.parkedAt = time;
-    actor.lastProgressAt = time;
-    notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.waiting, time, hooks);
+  if (hasVisibleTruck(runtime)) {
+    return;
   }
-}
-
-function targetRoadZForActor(runtime, actor) {
-  if (actor.phase === DAY_TRUCK_PHASES.departing) {
-    return runtime.layout.exitZ;
+  const actor = nextScheduledActor(runtime);
+  if (!actor || time + 1e-6 < actor.job.arrivalTime || bayOccupantConflict(runtime, actor)) {
+    return;
   }
-  if (actor.phase === DAY_TRUCK_PHASES.mergingOut) {
-    return actor.z;
-  }
-  return actor.holdZ;
-}
-
-function updateLaneTraffic(runtime, dt, time, hooks) {
-  const laneActors = getLaneActors(runtime);
-  for (let index = 0; index < laneActors.length; index += 1) {
-    const actor = laneActors[index];
-    const lead = index === 0 ? null : laneActors[index - 1];
-    const startX = actor.x;
-    const startZ = actor.z;
-    const targetZ = targetRoadZForActor(runtime, actor);
-    const remainingDistance = Math.max(0, targetZ - actor.z);
-    let desiredSpeed = actor.phase === DAY_TRUCK_PHASES.mergingOut ? 0 : actor.nominalRoadSpeed;
-
-    if (remainingDistance <= 0.03) {
-      desiredSpeed = 0;
-    }
-
-    if (lead) {
-      const leadDistance = lead.z - actor.z - runtime.road.truckLength;
-      if (leadDistance <= runtime.road.stopDistance) {
-        desiredSpeed = 0;
-      } else if (leadDistance < runtime.road.brakingDistance) {
-        const ratio = (leadDistance - runtime.road.stopDistance)
-          / (runtime.road.brakingDistance - runtime.road.stopDistance);
-        desiredSpeed = Math.min(desiredSpeed, actor.nominalRoadSpeed * clamp01(ratio));
-      }
-    }
-
-    const maxDelta = (desiredSpeed >= actor.speed ? runtime.road.roadAcceleration : runtime.road.roadBraking) * dt;
-    actor.speed = moveTowards(actor.speed, desiredSpeed, maxDelta);
-    if (actor.speed <= 0) {
-      actor.speed = 0;
-    }
-
-    const travel = Math.min(remainingDistance, actor.speed * dt);
-    actor.z += travel;
-    actor.x = runtime.layout.passingLaneX;
-    actor.heading = 0;
-    noteActorProgress(actor, time, startX, startZ);
-
-    if (
-      actor.phase === DAY_TRUCK_PHASES.enteringRoad
-      && actor.z - runtime.layout.entryZ >= runtime.road.entryProgressDistance
-    ) {
-      notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.drivingToParkingBay, time, hooks);
-    }
-
-    if (
-      actor.phase === DAY_TRUCK_PHASES.drivingToParkingBay
-      && actor.z >= actor.holdZ - 0.02
-      && canStartParking(runtime, actor)
-    ) {
-      startManeuver(runtime, actor, DAY_TRUCK_PHASES.parkingBay, time, {
-        duration: runtime.road.parkingDuration,
-        endX: runtime.layout.parkingLaneX,
-        endZ: actor.slotZ,
-        endHeading: 0.22,
-        completePhase: DAY_TRUCK_PHASES.waiting,
-      }, hooks);
-    }
-
-    if (actor.phase === DAY_TRUCK_PHASES.departing && actor.z >= runtime.layout.exitZ - 0.02) {
-      actor.visible = false;
-      actor.speed = 0;
-      actor.heading = 0;
-      notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.finished, time, hooks);
-      if (hooks?.onTruckFinished) {
-        hooks.onTruckFinished(actor, time, runtime);
-      }
-    }
-  }
-}
-
-function updateManeuvers(runtime, time, hooks) {
-  for (const actor of runtime.truckActors) {
-    if (!actor.maneuver) {
-      continue;
-    }
-    const maneuver = actor.maneuver;
-    const startX = actor.x;
-    const startZ = actor.z;
-    const t = clamp01((time - maneuver.startTime) / maneuver.duration);
-    const eased = easeInOutCubic(t);
-    actor.x = lerp(maneuver.startX, maneuver.endX, eased);
-    actor.z = lerp(maneuver.startZ, maneuver.endZ, eased);
-    actor.heading = lerp(maneuver.startHeading, maneuver.endHeading, eased);
-    actor.speed = 0;
-    noteActorProgress(actor, time, startX, startZ);
-
-    if (t < 1) {
-      continue;
-    }
-
-    actor.x = maneuver.endX;
-    actor.z = maneuver.endZ;
-    actor.heading = maneuver.endHeading;
-    actor.maneuver = null;
-
-    if (maneuver.completePhase === DAY_TRUCK_PHASES.waiting) {
-      actor.heading = 0;
-      actor.parkedAt = time;
-      notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.waiting, time, hooks);
-    } else if (maneuver.completePhase === DAY_TRUCK_PHASES.departing) {
-      actor.heading = 0;
-      notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.departing, time, hooks);
-    }
-  }
+  actor.visible = true;
+  actor.x = runtime.layout.parkingLaneX;
+  actor.z = actor.slotZ;
+  actor.heading = 0;
+  actor.speed = 0;
+  actor.parkedAt = time;
+  actor.lastProgressAt = time;
+  notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.waiting, time, hooks);
 }
 
 function setCranePose(runtime, pose) {

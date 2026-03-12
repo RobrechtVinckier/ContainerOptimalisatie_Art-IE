@@ -132,8 +132,8 @@
         "green": 4,
         "red": 9
       },
-      "inTargetSlot": 12,
-      "placementScore": 0.6573170731707317,
+      "inTargetSlot": 13,
+      "placementScore": 0.7182926829268292,
       "total": 18
     }
   },
@@ -151,8 +151,8 @@
       "lengthCostWeight": 10,
       "makespanSeconds": 52684.986667,
       "remainingContainers": 0,
-      "score": 0.932401,
-      "totalCraneWeightedCost": 187.0,
+      "score": 0.923788,
+      "totalCraneWeightedCost": 287.0,
       "totalJobs": 18,
       "totalLaneWaitSeconds": 0.0,
       "trucksUsed": 18
@@ -408,7 +408,7 @@
       "endPlacementScore": 0.994715,
       "greedyMoveCount": 0,
       "lengthCostWeight": 10,
-      "startPlacementScore": 0.657317,
+      "startPlacementScore": 0.718293,
       "tabuImmediateReversals": 419,
       "tabuMoveCount": 58,
       "tabuRelinkSteps": 0,

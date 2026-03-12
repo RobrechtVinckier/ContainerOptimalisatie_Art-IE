@@ -179,7 +179,7 @@ app.innerHTML = `
           <div class="algo-settings-header">
             <div>
               <h3>Algorithm Settings</h3>
-              <p>Basic mode is tuned for presentation. Advanced mode exposes the search internals.</p>
+              <p>Basic mode tunes low-cost company waves. Advanced mode exposes the secondary layout pressure and search internals.</p>
             </div>
             <div class="algo-mode-switch" role="tablist" aria-label="Algorithm settings detail level">
               <button id="algo-mode-basic" class="algo-mode-btn is-active" type="button" data-settings-mode="basic">Basic Only</button>
@@ -188,21 +188,22 @@ app.innerHTML = `
           </div>
           <div id="algo-panel-basic" class="algo-grid">
             <label>${fieldLabel("Optimization Budget (s)", "Maximum amount of night-shift time the optimizer may spend on planned moves.")}<input id="algo-night-budget" type="number" min="1" step="100" value="28800" /></label>
-            <label>${fieldLabel("Cluster Weight", "How strongly the optimizer groups containers of the same company together. Higher values improve clustering but can increase travel.")}<input id="algo-lam" type="number" min="0" step="0.1" value="1" /></label>
-            <label>${fieldLabel("Energy Weight", "How much the optimizer penalizes energy-heavy moves. Higher values make long and vertical crane moves less attractive.")}<input id="algo-energy-weight" type="number" min="0" step="0.1" value="1" /></label>
-            <label>${fieldLabel("Rehandle Penalty", "Penalty for mixed stacks that are likely to require extra reshuffles later in the day.")}<input id="algo-stack-rehandle-weight" type="number" min="0" step="0.1" value="1.0" /></label>
-            <label>${fieldLabel("Day Prep Priority", "Penalty for containers buried under other groups. Higher values keep soon-to-load containers more accessible for the day shift.")}<input id="algo-buried-foreign-weight" type="number" min="0" step="0.1" value="2.0" /></label>
+            <label>${fieldLabel("Movement / Energy Weight", "How strongly the optimizer penalizes energy-heavy moves. Higher values make expensive crane motion, especially along the length axis, less attractive.")}<input id="algo-energy-weight" type="number" min="0" step="0.1" value="1.8" /></label>
+            <label>${fieldLabel("Top Wave Continuity", "Penalty for stacks whose accessible top run breaks quickly. Higher values encourage extracting one company in a cleaner wave before switching.")}<input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.8" /></label>
+            <label>${fieldLabel("Stack Transition Penalty", "Penalty for too many company changes from top to bottom inside a stack. Higher values favor cleaner layered stacks with fewer forced switches.")}<input id="algo-stack-transition-weight" type="number" min="0" step="0.1" value="1.6" /></label>
+            <label>${fieldLabel("Rehandle Penalty", "Penalty for burying containers under other companies in ways that are likely to force extra reshuffles later in the day.")}<input id="algo-stack-rehandle-weight" type="number" min="0" step="0.1" value="1.4" /></label>
+            <label>${fieldLabel("Buried Blocking Penalty", "Penalty for same-company containers trapped under foreign containers. Higher values keep extraction paths cleaner for the day shift.")}<input id="algo-buried-foreign-weight" type="number" min="0" step="0.1" value="2.6" /></label>
           </div>
           <div id="algo-panel-advanced-wrap" class="algo-advanced-shell" hidden>
             <div class="algo-advanced-title">Advanced Search Controls</div>
             <div id="algo-panel-advanced" class="algo-grid algo-grid-advanced">
+              <label>${fieldLabel("Global Layout Weight (Minor)", "Small secondary pressure against completely scattering one company across the whole yard. Keep this low because stack flow matters more than yard-wide clustering.")}<input id="algo-lam" type="number" min="0" step="0.1" value="0.1" /></label>
               <label>${fieldLabel("Tabu Iterations", "Number of search iterations in the tabu phase. More iterations can improve solutions but take longer.")}<input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
               <label>${fieldLabel("Tabu Length", "How long recent moves stay temporarily forbidden to avoid immediate cycling.")}<input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
-              <label>${fieldLabel("Search Radius", "How far the candidate destination search may look from a group center on the width axis.")}<input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
-              <label>${fieldLabel("Focus Groups", "How many of the most spread-out groups are prioritized when generating candidate moves.")}<input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
-              <label>${fieldLabel("Top Mismatch Weight", "Penalty for stacks whose top container does not match the dominant group below it.")}<input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.1" /></label>
-              <label>${fieldLabel("Impurity Weight", "Penalty for stacks that mix multiple groups instead of staying compositionally clean.")}<input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="1.4" /></label>
-              <label>${fieldLabel("Fragmentation Weight", "Penalty for spreading the same group across too many stacks instead of keeping it compact.")}<input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.9" /></label>
+              <label>${fieldLabel("Local Search Radius", "How far the optimizer may search for nearby destination stacks around the source stack on the width axis.")}<input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
+              <label>${fieldLabel("Focus Pressure Groups", "How many company groups with the worst current stack-flow pressure are prioritized when generating candidate moves.")}<input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
+              <label>${fieldLabel("Stack Mix Penalty", "Penalty for stacks that mix multiple companies instead of keeping layers compositionally cleaner.")}<input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="0.6" /></label>
+              <label>${fieldLabel("Cross-Stack Spread (Minor)", "Small secondary penalty for scattering one company across many stacks. Keep this low unless you intentionally want more spatial compaction.")}<input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.1" /></label>
               <label>${fieldLabel("Quality Tie Epsilon", "If two moves are almost equal in quality, the optimizer uses this threshold before preferring the cheaper operational move.")}<input id="algo-quality-tie-eps" type="number" min="0" step="0.000001" value="0.000000001" /></label>
             </div>
           </div>
@@ -252,6 +253,7 @@ const refs = {
   algoTopGroups: document.getElementById("algo-top-groups"),
   algoNightBudget: document.getElementById("algo-night-budget"),
   algoStackTopMismatchWeight: document.getElementById("algo-stack-top-mismatch-weight"),
+  algoStackTransitionWeight: document.getElementById("algo-stack-transition-weight"),
   algoStackRehandleWeight: document.getElementById("algo-stack-rehandle-weight"),
   algoStackImpurityWeight: document.getElementById("algo-stack-impurity-weight"),
   algoBuriedForeignWeight: document.getElementById("algo-buried-foreign-weight"),
@@ -583,6 +585,7 @@ for (const field of [
   refs.algoTopGroups,
   refs.algoNightBudget,
   refs.algoStackTopMismatchWeight,
+  refs.algoStackTransitionWeight,
   refs.algoStackRehandleWeight,
   refs.algoStackImpurityWeight,
   refs.algoBuriedForeignWeight,
@@ -1196,6 +1199,7 @@ function setAlgorithmFormValues(settings) {
   refs.algoTopGroups.value = String(settings.topGroups);
   refs.algoNightBudget.value = String(settings.nightBudget);
   refs.algoStackTopMismatchWeight.value = String(settings.stackTopMismatchWeight);
+  refs.algoStackTransitionWeight.value = String(settings.stackTransitionWeight);
   refs.algoStackRehandleWeight.value = String(settings.stackRehandleWeight);
   refs.algoStackImpurityWeight.value = String(settings.stackImpurityWeight);
   refs.algoBuriedForeignWeight.value = String(settings.buriedForeignWeight);
@@ -1212,6 +1216,7 @@ function getAlgorithmFormValues() {
   const topGroups = Number(refs.algoTopGroups.value);
   const nightBudget = Number(refs.algoNightBudget.value);
   const stackTopMismatchWeight = Number(refs.algoStackTopMismatchWeight.value);
+  const stackTransitionWeight = Number(refs.algoStackTransitionWeight.value);
   const stackRehandleWeight = Number(refs.algoStackRehandleWeight.value);
   const stackImpurityWeight = Number(refs.algoStackImpurityWeight.value);
   const buriedForeignWeight = Number(refs.algoBuriedForeignWeight.value);
@@ -1235,6 +1240,8 @@ function getAlgorithmFormValues() {
     || nightBudget < 1
     || !Number.isFinite(stackTopMismatchWeight)
     || stackTopMismatchWeight < 0
+    || !Number.isFinite(stackTransitionWeight)
+    || stackTransitionWeight < 0
     || !Number.isFinite(stackRehandleWeight)
     || stackRehandleWeight < 0
     || !Number.isFinite(stackImpurityWeight)
@@ -1258,6 +1265,7 @@ function getAlgorithmFormValues() {
     topGroups: Math.floor(topGroups),
     nightBudget,
     stackTopMismatchWeight,
+    stackTransitionWeight,
     stackRehandleWeight,
     stackImpurityWeight,
     buriedForeignWeight,

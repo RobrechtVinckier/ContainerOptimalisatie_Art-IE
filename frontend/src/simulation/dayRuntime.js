@@ -307,16 +307,17 @@ function spawnReadyTrucks(runtime, time, hooks) {
     if (!shouldDispatchActor(runtime, actor, time)) {
       continue;
     }
-    if (!canEnterRoad(runtime)) {
+    if (bayOccupantConflict(runtime, actor)) {
       break;
     }
     actor.visible = true;
-    actor.x = runtime.layout.passingLaneX;
-    actor.z = runtime.layout.entryZ;
+    actor.x = runtime.layout.parkingLaneX;
+    actor.z = actor.slotZ;
     actor.heading = 0;
-    actor.speed = actor.nominalRoadSpeed * 0.55;
+    actor.speed = 0;
+    actor.parkedAt = time;
     actor.lastProgressAt = time;
-    notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.enteringRoad, time, hooks);
+    notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.waiting, time, hooks);
   }
 }
 

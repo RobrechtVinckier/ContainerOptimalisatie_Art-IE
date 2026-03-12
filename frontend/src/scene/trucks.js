@@ -223,6 +223,8 @@ export function createTruckModel({ cabColor, containerColor = null, metrics, col
   };
   group.userData.cargo = null;
   group.userData.displayId = formatTruckDisplayId(truckId);
+  group.userData.roadLength = trailerLength + 2.8;
+  group.userData.roadWidth = truckWidth;
 
   if (containerColor) {
     setTruckCargo(group, containerColor, { metrics, colorToThree });

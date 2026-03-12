@@ -6,6 +6,7 @@ import { YARD_CONFIG, cloneStacks, placementScoreWeightsFromAlgorithmSettings, r
 import { buildCrane, buildGround } from "./scene/layout.js";
 import { createLighting, updateLighting } from "./scene/lighting.js";
 import { buildTrucks, clearTruckCargo, createTruckModel, formatTruckDisplayId, setTruckCargo } from "./scene/trucks.js";
+import { DAY_TRUCK_PHASES, advanceDayRuntime, createDayRuntime, dayRuntimeHasActiveActors } from "./simulation/dayRuntime.js";
 import { renderDayTimeline } from "./ui/dayTimeline.js";
 
 const SCALE = 0.72;
@@ -285,6 +286,7 @@ const state = {
   dayCyclePlan: null,
   dayStats: null,
   activeDayJobIndex: -1,
+  dayRuntime: null,
   clockRunning: false,
   clockBoost: 1,
   lastProjectionDrawAt: 0,
@@ -656,6 +658,165 @@ function resetTruckFleet() {
   }
 }
 
+function createPoseSegment(start, end, fromPose, toPose) {
+  return {
+    start,
+    end,
+    fromPose: { ...fromPose },
+    toPose: { ...toPose },
+  };
+}
+
+function buildDayCranePlan(actor, startTime, cranePose) {
+  const job = actor.job;
+  const sourceStack = state.stacks?.[job.source.x]?.[job.source.z];
+  if (!sourceStack?.length) {
+    return null;
+  }
+
+  const sourceX = stackXToWorld(job.source.x);
+  const sourceZ = stackZToWorld(job.source.z);
+  const truckDropX = world.trucks.parkingLaneX - LANE_WIDTH_WORLD * 0.13;
+  const truckDropZ = actor.slotZ;
+  const pickLevel = sourceStack.length - 1;
+  const pickY = stackToWorld(job.source.x, job.source.z, pickLevel).y + CONTAINER_VISUAL_HEIGHT * 0.5 + 0.58;
+  const truckHookY = CONTAINER_VISUAL_HEIGHT + 1.9;
+  const moveDuration = Math.max(0.05, Number(job.craneTaskSeconds) || 0.05);
+
+  const startPose = {
+    x: cranePose.x,
+    z: cranePose.z,
+    hookY: cranePose.hookY,
+  };
+  const sourceTravelPose = {
+    x: sourceX,
+    z: sourceZ,
+    hookY: startPose.hookY,
+  };
+  const sourcePickupPose = {
+    x: sourceX,
+    z: sourceZ,
+    hookY: pickY,
+  };
+  const sourceLiftPose = {
+    x: sourceX,
+    z: sourceZ,
+    hookY: world.crane.travelHookY,
+  };
+  const truckTravelPose = {
+    x: truckDropX,
+    z: truckDropZ,
+    hookY: world.crane.travelHookY,
+  };
+  const truckDropPose = {
+    x: truckDropX,
+    z: truckDropZ,
+    hookY: truckHookY,
+  };
+  const endPose = {
+    x: truckDropX,
+    z: truckDropZ,
+    hookY: world.crane.travelHookY,
+  };
+
+  const weightToSource = Math.abs(sourceX - startPose.x) / STEP.x
+    + YARD_CONFIG.lengthCostWeight * (Math.abs(sourceZ - startPose.z) / STEP.z);
+  const weightToTruckDrop = Math.abs(truckDropX - sourceX) / STEP.x
+    + YARD_CONFIG.lengthCostWeight * (Math.abs(truckDropZ - sourceZ) / STEP.z);
+  const hookDownWeight = 0.34;
+  const hookUpWeight = 0.24;
+  const totalWeight = Math.max(
+    0.0001,
+    weightToSource + hookDownWeight + hookUpWeight + weightToTruckDrop + hookDownWeight + hookUpWeight,
+  );
+
+  let clockCursor = startTime;
+  const takeClockRange = (weight, forceEnd = false) => {
+    const rangeStart = clockCursor;
+    if (forceEnd) {
+      clockCursor = startTime + moveDuration;
+    } else {
+      clockCursor += moveDuration * (weight / totalWeight);
+    }
+    return { start: rangeStart, end: clockCursor };
+  };
+
+  const sourceRange = takeClockRange(weightToSource);
+  const pickupRange = takeClockRange(hookDownWeight);
+  const liftRange = takeClockRange(hookUpWeight);
+  const truckRange = takeClockRange(weightToTruckDrop);
+  const dropRange = takeClockRange(hookDownWeight);
+  const clearRange = takeClockRange(hookUpWeight, true);
+
+  return {
+    startTime,
+    pickupTime: pickupRange.end,
+    dropTime: dropRange.end,
+    endTime: clearRange.end,
+    finalPose: endPose,
+    segments: [
+      createPoseSegment(sourceRange.start, sourceRange.end, startPose, sourceTravelPose),
+      createPoseSegment(pickupRange.start, pickupRange.end, sourceTravelPose, sourcePickupPose),
+      createPoseSegment(liftRange.start, liftRange.end, sourcePickupPose, sourceLiftPose),
+      createPoseSegment(truckRange.start, truckRange.end, sourceLiftPose, truckTravelPose),
+      createPoseSegment(dropRange.start, dropRange.end, truckTravelPose, truckDropPose),
+      createPoseSegment(clearRange.start, clearRange.end, truckDropPose, endPose),
+    ],
+  };
+}
+
+function syncDayRuntimeVisuals(runtime) {
+  if (!runtime) {
+    return;
+  }
+
+  const nextActiveJobIndex = runtime.schedule?.activeJobIndex ?? -1;
+  if (state.activeDayJobIndex !== nextActiveJobIndex) {
+    state.activeDayJobIndex = nextActiveJobIndex;
+    updateDayTimeline();
+  }
+
+  state.cranePose.x = runtime.crane.pose.x;
+  state.cranePose.z = runtime.crane.pose.z;
+  state.cranePose.hookY = runtime.crane.pose.hookY;
+
+  for (const actor of runtime.truckActors) {
+    const truck = actor.visual;
+    if (!truck) {
+      continue;
+    }
+    truck.visible = actor.visible;
+    if (!actor.visible) {
+      continue;
+    }
+    truck.position.set(actor.x, 0.02, actor.z);
+    truck.rotation.y = actor.heading;
+  }
+}
+
+function countRemainingContainers(stacks) {
+  if (!Array.isArray(stacks)) {
+    return 0;
+  }
+  let total = 0;
+  for (const column of stacks) {
+    for (const stack of column) {
+      total += stack.length;
+    }
+  }
+  return total;
+}
+
+function stepDaySimulation() {
+  const runtime = state.dayRuntime;
+  if (!runtime || state.cyclePhase !== "dayRunning") {
+    return;
+  }
+
+  advanceDayRuntime(runtime, state.phaseClockSeconds, runtime.hooks);
+  syncDayRuntimeVisuals(runtime);
+}
+
 function createContainerMesh(color) {
   const group = new THREE.Group();
   const height = CONTAINER_VISUAL_HEIGHT;
@@ -859,10 +1020,6 @@ function applyCranePose() {
   }
 }
 
-function animateTrucks(deltaSeconds) {
-  void deltaSeconds;
-}
-
 function updateSimulationClock(deltaSeconds) {
   if (!state.clockRunning || state.paused) {
     return;
@@ -911,8 +1068,8 @@ function startRenderLoop() {
       phaseClockSeconds: state.phaseClockSeconds,
     });
     updateCameraTransition(delta);
+    stepDaySimulation();
     world.controls.update();
-    animateTrucks(delta);
     applyCranePose();
     world.renderer.render(world.scene, world.camera);
     requestAnimationFrame(render);
@@ -1452,6 +1609,7 @@ async function generateScenario(preparedRandomSetup = null) {
   state.nightStats = null;
   state.dayCyclePlan = null;
   state.dayStats = null;
+  state.dayRuntime = null;
   state.activeDayJobIndex = -1;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
@@ -1506,10 +1664,13 @@ function cancelRun() {
   state.runToken += 1;
   state.solving = false;
   state.paused = false;
+  state.dayRuntime = null;
+  state.activeDayJobIndex = -1;
   state.clockRunning = false;
   state.clockBoost = 1;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
+  updateDayTimeline();
   resetTruckFleet();
 }
 
@@ -1732,168 +1893,66 @@ function removeContainerVisual(containerId) {
   state.selectedContainerIds.delete(containerId);
 }
 
-function getTruckSlotWorldZ(slotIndex) {
-  if (!world.trucks.slotZ.length) {
-    return 0;
-  }
-  const safeIndex = Math.max(0, Math.min(world.trucks.slotZ.length - 1, Number(slotIndex) || 0));
-  return world.trucks.slotZ[safeIndex];
-}
-
-async function moveTruckTo(truck, targetX, targetZ, token, durationSeconds = 6) {
-  const startHeading = truck.rotation.y;
-  const startX = truck.position.x;
-  const startZ = truck.position.z;
-  const start = state.phaseClockSeconds;
-  const end = start + Math.max(0.05, Number(durationSeconds) || 0.05);
-  await animateBySimulationTime(start, end, token, (t) => {
-    const eased = t < 0.5
-      ? 4 * t * t * t
-      : 1 - ((-2 * t + 2) ** 3) / 2;
-    truck.position.x = THREE.MathUtils.lerp(startX, targetX, eased);
-    truck.position.z = THREE.MathUtils.lerp(startZ, targetZ, eased);
-    const xDelta = targetX - startX;
-    const zDelta = targetZ - startZ;
-    const targetHeading = Math.abs(xDelta) > 0.12 ? -Math.sign(xDelta) * 0.24 : 0;
-    truck.rotation.y = THREE.MathUtils.lerp(startHeading, targetHeading, eased);
-  });
-  truck.rotation.y = 0;
-}
-
-async function executeDayJob(job, token) {
-  const truck = getOrCreateTruck(job.truckId, job.companyColor);
-  const slotZ = getTruckSlotWorldZ(job.slotIndex);
-
-  clearTruckCargo(truck);
-  truck.visible = true;
-  truck.rotation.y = 0;
-  truck.position.set(world.trucks.passingLaneX, 0.02, world.trucks.entryZ);
-
-  await advancePhaseClockTo(job.arrivalTime, token);
-  if (token !== state.runToken) {
-    return;
-  }
-
-  refs.statusText.textContent = `${formatTruckDisplayId(job.truckId)} arriving for ${job.company}.`;
-  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ - STEP.z * 0.35, token, 7.8);
-  if (token !== state.runToken) {
-    return;
-  }
-  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ, token, 1.5);
-  if (token !== state.runToken) {
-    return;
-  }
-  await moveTruckTo(truck, world.trucks.parkingLaneX, slotZ, token, 2.6);
-  if (token !== state.runToken) {
-    return;
-  }
-
-  await advancePhaseClockTo(job.loadStartTime, token);
-  if (token !== state.runToken) {
-    return;
-  }
-
-  const sourceStack = state.stacks[job.source.x][job.source.z];
-  if (!sourceStack.length) {
-    return;
-  }
-  const topContainer = sourceStack[sourceStack.length - 1];
-  const sourceContainer = topContainer;
-  const sourceX = stackXToWorld(job.source.x);
-  const sourceZ = stackZToWorld(job.source.z);
-  const truckDropX = world.trucks.parkingLaneX - LANE_WIDTH_WORLD * 0.13;
-
-  const loadStart = Number.isFinite(job.loadStartTime) ? job.loadStartTime : state.phaseClockSeconds;
-  const loadEnd = Number.isFinite(job.loadEndTime)
-    ? job.loadEndTime
-    : loadStart + Math.max(1, Number(job.craneTaskSeconds) || 1);
-  const loadDuration = Math.max(0.05, loadEnd - loadStart);
-  const weightToSource = Math.abs(sourceX - state.cranePose.x) / STEP.x
-    + YARD_CONFIG.lengthCostWeight * (Math.abs(sourceZ - state.cranePose.z) / STEP.z);
-  const weightToTruckDrop = Math.abs(truckDropX - sourceX) / STEP.x
-    + YARD_CONFIG.lengthCostWeight * (Math.abs(slotZ - sourceZ) / STEP.z);
-  const hookDownWeight = 0.34;
-  const hookUpWeight = 0.24;
-  const totalWeight = Math.max(
-    0.0001,
-    weightToSource + hookDownWeight + hookUpWeight + weightToTruckDrop + hookDownWeight + hookUpWeight,
-  );
-  let clockCursor = loadStart;
-  const takeClockRange = (weight, forceEnd = false) => {
-    const start = clockCursor;
-    if (forceEnd) {
-      clockCursor = loadEnd;
-    } else {
-      clockCursor += loadDuration * (weight / totalWeight);
-    }
-    return { start, end: clockCursor };
+function createDayRuntimeHooks(runtime) {
+  return {
+    buildCranePlan(actor, startTime, cranePose) {
+      return buildDayCranePlan(actor, startTime, cranePose);
+    },
+    onTruckPhaseChange(actor, previousPhase, nextPhase) {
+      void previousPhase;
+      const truckLabel = formatTruckDisplayId(actor.truckId);
+      if (nextPhase === DAY_TRUCK_PHASES.enteringRoad) {
+        refs.statusText.textContent = `${truckLabel} entering the road for ${actor.company}.`;
+      } else if (nextPhase === DAY_TRUCK_PHASES.waiting) {
+        refs.statusText.textContent = `${truckLabel} parked at bay ${actor.job.slotIndex + 1} and waiting for the crane.`;
+      } else if (nextPhase === DAY_TRUCK_PHASES.loading) {
+        refs.statusText.textContent = `Day cycle: loading ${actor.job.containerId} onto ${actor.job.truckId} (${actor.company}).`;
+      } else if (nextPhase === DAY_TRUCK_PHASES.loaded) {
+        refs.statusText.textContent = `${truckLabel} loaded and waiting for a merge window.`;
+      } else if (nextPhase === DAY_TRUCK_PHASES.departing) {
+        refs.statusText.textContent = `${truckLabel} leaving ${actor.company}.`;
+      }
+    },
+    onCranePickup(actor) {
+      const sourceStack = state.stacks?.[actor.job.source.x]?.[actor.job.source.z];
+      if (!sourceStack?.length) {
+        return;
+      }
+      const container = sourceStack.pop();
+      actor.pickedContainer = container;
+      actor.pickedContainerId = container.id;
+      state.carryingId = container.id;
+      updateProjections();
+      updateStats();
+    },
+    onCraneDrop(actor) {
+      const container = actor.pickedContainer;
+      if (!container) {
+        return;
+      }
+      state.carryingId = null;
+      removeContainerVisual(container.id);
+      if (actor.visual) {
+        setTruckCargo(actor.visual, container.color, { metrics: SCENE_METRICS, colorToThree });
+      }
+      actor.cargoVisible = true;
+      updateProjections();
+      updateStats();
+    },
+    onCraneJobComplete(actor) {
+      state.moveCursor += 1;
+      state.weightedCost += actor.job.craneWeightedCost;
+      updateStats();
+    },
+    onTruckFinished(actor) {
+      if (actor.visual) {
+        clearTruckCargo(actor.visual);
+      }
+      if (runtime.completed) {
+        refs.statusText.textContent = "All day-cycle truck jobs cleared the road.";
+      }
+    },
   };
-
-  await moveCraneHorizontal(sourceX, sourceZ, token, takeClockRange(weightToSource));
-  if (token !== state.runToken) {
-    return;
-  }
-
-  const pickY = stackToWorld(job.source.x, job.source.z, sourceStack.length - 1).y + CONTAINER_VISUAL_HEIGHT * 0.5 + 0.58;
-  await moveHook(pickY, token, takeClockRange(hookDownWeight));
-  if (token !== state.runToken) {
-    return;
-  }
-
-  sourceStack.pop();
-  state.carryingId = sourceContainer.id;
-  updateProjections();
-  updateStats();
-
-  await moveHook(world.crane.travelHookY, token, takeClockRange(hookUpWeight));
-  if (token !== state.runToken) {
-    return;
-  }
-
-  await moveCraneHorizontal(truckDropX, slotZ, token, takeClockRange(weightToTruckDrop));
-  if (token !== state.runToken) {
-    return;
-  }
-
-  const truckHookY = CONTAINER_VISUAL_HEIGHT + 1.9;
-  await moveHook(truckHookY, token, takeClockRange(hookDownWeight));
-  if (token !== state.runToken) {
-    return;
-  }
-
-  state.carryingId = null;
-  removeContainerVisual(sourceContainer.id);
-  setTruckCargo(truck, sourceContainer.color, { metrics: SCENE_METRICS, colorToThree });
-  updateProjections();
-  updateStats();
-
-  await moveHook(world.crane.travelHookY, token, takeClockRange(hookUpWeight, true));
-  if (token !== state.runToken) {
-    return;
-  }
-  await advancePhaseClockTo(loadEnd, token);
-  if (token !== state.runToken) {
-    return;
-  }
-
-  await advancePhaseClockTo(job.departTime, token);
-  if (token !== state.runToken) {
-    return;
-  }
-
-  refs.statusText.textContent = `${formatTruckDisplayId(job.truckId)} leaving ${job.company}.`;
-  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ, token, 1.8);
-  if (token !== state.runToken) {
-    return;
-  }
-  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ + STEP.z * 0.45, token, 1.1);
-  if (token !== state.runToken) {
-    return;
-  }
-  await moveTruckTo(truck, world.trucks.passingLaneX, world.trucks.exitZ, token, 6.8);
-
-  clearTruckCargo(truck);
-  truck.visible = false;
 }
 
 async function runDayCycle(dayCycle, token) {
@@ -1916,31 +1975,89 @@ async function runDayCycle(dayCycle, token) {
     return;
   }
 
-  refs.statusText.textContent = `Running day schedule (${jobs.length} truck jobs)...`;
-  for (let index = 0; index < jobs.length; index += 1) {
-    if (token !== state.runToken) {
-      return;
+  const visuals = jobs.map((job) => {
+    const truck = getOrCreateTruck(job.truckId, job.companyColor);
+    clearTruckCargo(truck);
+    truck.visible = false;
+    truck.position.set(world.trucks.passingLaneX, 0.02, world.trucks.entryZ);
+    truck.rotation.y = 0;
+    return truck;
+  });
+  const maxRoadLength = visuals.reduce((maxLength, truck) => {
+    const roadLength = Number(truck.userData?.roadLength);
+    if (!Number.isFinite(roadLength)) {
+      return maxLength;
     }
-    const job = jobs[index];
-    state.activeDayJobIndex = index;
-    updateDayTimeline();
-    refs.statusText.textContent = `Day cycle: loading ${job.containerId} onto ${job.truckId} (${job.company}).`;
-    await executeDayJob(job, token);
-    if (token !== state.runToken) {
-      return;
-    }
-    state.moveCursor = index + 1;
-    state.weightedCost += job.craneWeightedCost;
-    updateStats();
-  }
+    return Math.max(maxLength, roadLength);
+  }, STEP.z * 0.84);
 
+  const runtime = createDayRuntime(dayCycle, {
+    entryZ: world.trucks.entryZ,
+    exitZ: world.trucks.exitZ,
+    passingLaneX: world.trucks.passingLaneX,
+    parkingLaneX: world.trucks.parkingLaneX,
+    slotZ: world.trucks.slotZ,
+    initialCranePose: state.cranePose,
+    fixedStepSeconds: 0.2,
+    entryProgressDistance: 2.6,
+    approachBuffer: STEP.z * 0.34,
+    nominalRoadSpeed: STEP.z * 0.64,
+    roadAcceleration: STEP.z * 0.64,
+    roadBraking: STEP.z * 1.24,
+    stopDistance: Math.max(STEP.z * 0.48, maxRoadLength * 0.44),
+    brakingDistance: Math.max(STEP.z * 0.98, maxRoadLength * 0.9),
+    truckLength: Math.max(STEP.z * 0.72, maxRoadLength * 0.78),
+    bayClearance: STEP.z * 0.88,
+    entrySpacing: Math.max(STEP.z * 0.96, maxRoadLength * 0.9),
+    mergeClearanceAhead: Math.max(STEP.z * 0.82, maxRoadLength * 0.74),
+    mergeClearanceBehind: Math.max(STEP.z * 1.35, maxRoadLength * 1.25),
+    parkingDuration: 2.4,
+    mergeDuration: 2.1,
+    mergeAdvanceDistance: STEP.z * 0.32,
+  });
+
+  runtime.truckActors.forEach((actor, index) => {
+    actor.visual = visuals[index];
+    actor.visual.visible = false;
+  });
+  runtime.hooks = createDayRuntimeHooks(runtime);
+
+  state.dayRuntime = runtime;
+  refs.statusText.textContent = `Running day schedule with independent road traffic (${jobs.length} truck jobs)...`;
+  syncDayRuntimeVisuals(runtime);
+
+  await waitForSimulationStep(token, () => {
+    return runtime.completed || state.phaseClockSeconds >= dayDurationSeconds;
+  });
   if (token !== state.runToken) {
     return;
   }
 
   state.activeDayJobIndex = -1;
   updateDayTimeline();
-  await advancePhaseClockTo(dayDurationSeconds, token, { boost: 48 });
+
+  if (runtime.completed && !dayRuntimeHasActiveActors(runtime)) {
+    state.dayRuntime = null;
+  }
+
+  if (state.phaseClockSeconds < dayDurationSeconds) {
+    await advancePhaseClockTo(dayDurationSeconds, token, { boost: 48 });
+    if (token !== state.runToken) {
+      return;
+    }
+  }
+
+  state.dayRuntime = null;
+  if (state.dayStats) {
+    const remainingContainers = countRemainingContainers(state.stacks);
+    state.dayStats = {
+      ...state.dayStats,
+      remainingContainers,
+      completedWithinWindow: remainingContainers === 0,
+      makespanSeconds: Math.max(state.dayStats.makespanSeconds, state.phaseClockSeconds),
+    };
+    updateRuntimeStats();
+  }
 }
 
 async function solveScenario() {
@@ -1961,6 +2078,7 @@ async function solveScenario() {
   state.moveCursor = 0;
   state.moveTotal = 0;
   state.weightedCost = 0;
+  state.dayRuntime = null;
   state.phaseClockSeconds = 0;
   setClockPhaseBase(NIGHT_CLOCK_BASE_SECONDS);
   setPhaseClock(0);

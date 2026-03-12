@@ -29,6 +29,9 @@ const DEFAULTS = Object.freeze({
   truckLength: 7.4,
   bayClearance: 8.1,
   entrySpacing: 9.4,
+  preferredVisibleTrucks: 2,
+  maxVisibleTrucks: 3,
+  dispatchLookaheadSeconds: 150.0,
   mergeClearanceAhead: 8.8,
   mergeClearanceBehind: 15.0,
   mergePriorityStopDistance: 3.6,
@@ -173,6 +176,10 @@ function getLaneActors(runtime) {
     });
 }
 
+function getVisibleActors(runtime) {
+  return runtime.truckActors.filter((actor) => actor.visible && actor.phase !== DAY_TRUCK_PHASES.finished);
+}
+
 function noteActorProgress(actor, time, startX, startZ) {
   const moved = Math.abs(actor.x - startX) > 0.03 || Math.abs(actor.z - startZ) > 0.03;
   if (moved) {
@@ -208,6 +215,36 @@ function canEnterRoad(runtime) {
     }
     return actor.z >= minZ;
   });
+}
+
+function shouldDispatchActor(runtime, actor, time) {
+  if (time + 1e-6 >= actor.job.arrivalTime) {
+    return true;
+  }
+
+  const visibleActors = getVisibleActors(runtime);
+  if (visibleActors.length >= runtime.road.maxVisibleTrucks) {
+    return false;
+  }
+
+  const previewTime = actor.job.arrivalTime - runtime.road.dispatchLookaheadSeconds;
+  if (time + 1e-6 < previewTime) {
+    return false;
+  }
+
+  if (!visibleActors.length) {
+    return true;
+  }
+
+  const highActivityPhases = new Set([
+    DAY_TRUCK_PHASES.waiting,
+    DAY_TRUCK_PHASES.loading,
+    DAY_TRUCK_PHASES.loaded,
+    DAY_TRUCK_PHASES.mergingOut,
+    DAY_TRUCK_PHASES.departing,
+  ]);
+  const highActivityVisible = visibleActors.some((visibleActor) => highActivityPhases.has(visibleActor.phase));
+  return highActivityVisible || visibleActors.length < runtime.road.preferredVisibleTrucks;
 }
 
 function bayOccupantConflict(runtime, actor) {
@@ -266,7 +303,7 @@ function spawnReadyTrucks(runtime, time, hooks) {
     if (actor.phase !== DAY_TRUCK_PHASES.scheduled) {
       continue;
     }
-    if (time + 1e-6 < actor.job.arrivalTime) {
+    if (!shouldDispatchActor(runtime, actor, time)) {
       continue;
     }
     if (!canEnterRoad(runtime)) {
@@ -552,6 +589,9 @@ export function createDayRuntime(dayCycle, config = {}) {
     truckLength: Number(config.truckLength) || DEFAULTS.truckLength,
     bayClearance: Number(config.bayClearance) || DEFAULTS.bayClearance,
     entrySpacing: Number(config.entrySpacing) || DEFAULTS.entrySpacing,
+    preferredVisibleTrucks: Number(config.preferredVisibleTrucks) || DEFAULTS.preferredVisibleTrucks,
+    maxVisibleTrucks: Number(config.maxVisibleTrucks) || DEFAULTS.maxVisibleTrucks,
+    dispatchLookaheadSeconds: Number(config.dispatchLookaheadSeconds) || DEFAULTS.dispatchLookaheadSeconds,
     mergeClearanceAhead: Number(config.mergeClearanceAhead) || DEFAULTS.mergeClearanceAhead,
     mergeClearanceBehind: Number(config.mergeClearanceBehind) || DEFAULTS.mergeClearanceBehind,
     mergePriorityStopDistance: Number(config.mergePriorityStopDistance) || DEFAULTS.mergePriorityStopDistance,

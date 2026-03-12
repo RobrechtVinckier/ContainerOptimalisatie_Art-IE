@@ -1,19 +1,10 @@
 import "./style.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import {
-  YARD_CONFIG,
-  cloneStacks,
-  placementScoreWeightsFromAlgorithmSettings,
-  resolveColorHex,
-  summarizeStacks,
-} from "./yardModel.js";
-import {
-  getAlgorithmSettings,
-  requestRandomConfiguration,
-  requestSolvePlan,
-  updateAlgorithmSettings,
-} from "./backendClient.js";
+import { getAlgorithmSettings, requestRandomConfiguration, requestSolvePlan, updateAlgorithmSettings } from "./api/backendClient.js";
+import { YARD_CONFIG, cloneStacks, placementScoreWeightsFromAlgorithmSettings, resolveColorHex, summarizeStacks } from "./config/yardModel.js";
+import { buildCrane, buildGround } from "./scene/layout.js";
+import { buildTrucks, clearTruckCargo, createTruckModel, setTruckCargo } from "./scene/trucks.js";
 
 const SCALE = 0.72;
 const CONTAINER_DIM = Object.freeze({
@@ -57,6 +48,20 @@ const ALGO_SETTINGS_SYNC_DEBOUNCE_MS = 450;
 const CONTAINER_MIN_X = -TOTAL_WIDTH_WORLD / 2;
 const LANE_MIN_X = CONTAINER_MIN_X + YARD_WIDTH_WORLD;
 const YARD_MIN_Z = -YARD_LENGTH_WORLD / 2;
+const SCENE_METRICS = Object.freeze({
+  totalWidthWorld: TOTAL_WIDTH_WORLD,
+  yardLengthWorld: YARD_LENGTH_WORLD,
+  yardWidthWorld: YARD_WIDTH_WORLD,
+  laneWidthWorld: LANE_WIDTH_WORLD,
+  laneMinX: LANE_MIN_X,
+  yardMinZ: YARD_MIN_Z,
+  daySlotCount: DAY_SLOT_COUNT,
+  yardConfig: YARD_CONFIG,
+  step: STEP,
+  containerMinX: CONTAINER_MIN_X,
+  containerDim: CONTAINER_DIM,
+  containerVisualHeight: CONTAINER_VISUAL_HEIGHT,
+});
 
 const app = document.querySelector("#app");
 app.innerHTML = `
@@ -537,10 +542,10 @@ function initWorld(host) {
   scene.add(environmentGroup);
   scene.add(containerRoot);
 
-  buildGround(environmentGroup);
-  const trucks = buildTrucks(environmentGroup);
+  buildGround(environmentGroup, SCENE_METRICS);
+  const trucks = buildTrucks(environmentGroup, SCENE_METRICS);
 
-  const crane = buildCrane(environmentGroup);
+  const crane = buildCrane(environmentGroup, SCENE_METRICS);
 
   const containerVisuals = new Map();
 
@@ -577,270 +582,6 @@ function initWorld(host) {
   };
 }
 
-function buildGround(group) {
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(TOTAL_WIDTH_WORLD + 22, YARD_LENGTH_WORLD + 30),
-    new THREE.MeshStandardMaterial({
-      color: "#d9e2eb",
-      roughness: 0.9,
-      metalness: 0.05,
-    }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  group.add(ground);
-
-  const yardPad = new THREE.Mesh(
-    new THREE.PlaneGeometry(YARD_WIDTH_WORLD, YARD_LENGTH_WORLD),
-    new THREE.MeshStandardMaterial({
-      color: "#8da8be",
-      roughness: 0.8,
-      metalness: 0.04,
-    }),
-  );
-  yardPad.rotation.x = -Math.PI / 2;
-  yardPad.position.set(CONTAINER_MIN_X + YARD_WIDTH_WORLD / 2, 0.01, 0);
-  yardPad.receiveShadow = true;
-  group.add(yardPad);
-
-  const lanePad = new THREE.Mesh(
-    new THREE.PlaneGeometry(LANE_WIDTH_WORLD, YARD_LENGTH_WORLD),
-    new THREE.MeshStandardMaterial({
-      color: "#a3afbb",
-      roughness: 0.87,
-      metalness: 0.08,
-    }),
-  );
-  lanePad.rotation.x = -Math.PI / 2;
-  lanePad.position.set(LANE_MIN_X + LANE_WIDTH_WORLD / 2, 0.015, 0);
-  lanePad.receiveShadow = true;
-  group.add(lanePad);
-
-  const stripeMat = new THREE.MeshStandardMaterial({ color: "#ffd248", roughness: 0.55 });
-  const passingLaneX = LANE_MIN_X + LANE_WIDTH_WORLD * 0.74;
-  const parkingLaneX = LANE_MIN_X + LANE_WIDTH_WORLD * 0.3;
-  const laneDividerX = (passingLaneX + parkingLaneX) / 2;
-
-  const divider = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, YARD_LENGTH_WORLD), stripeMat);
-  divider.position.set(laneDividerX, 0.032, 0);
-  group.add(divider);
-
-  const arrowCount = Math.floor(YARD_LENGTH_WORLD / 8);
-  for (let i = 0; i < arrowCount; i += 1) {
-    const z = YARD_MIN_Z + 3 + i * 8;
-    const shaft = new THREE.Mesh(new THREE.BoxGeometry(LANE_WIDTH_WORLD * 0.08, 0.05, 2.3), stripeMat);
-    shaft.position.set(passingLaneX, 0.035, z);
-    group.add(shaft);
-
-    const head = new THREE.Mesh(new THREE.ConeGeometry(LANE_WIDTH_WORLD * 0.16, 0.86, 3), stripeMat);
-    head.rotation.x = -Math.PI / 2;
-    head.position.set(passingLaneX, 0.035, z + 1.45);
-    group.add(head);
-  }
-
-  const slotMarkMat = new THREE.MeshStandardMaterial({ color: "#fff2c4", roughness: 0.65 });
-  const slotLength = YARD_LENGTH_WORLD / DAY_SLOT_COUNT;
-  for (let i = 0; i <= DAY_SLOT_COUNT; i += 1) {
-    const z = YARD_MIN_Z + i * slotLength;
-    const line = new THREE.Mesh(new THREE.BoxGeometry(LANE_WIDTH_WORLD * 0.46, 0.03, 0.06), slotMarkMat);
-    line.position.set(parkingLaneX, 0.033, z);
-    group.add(line);
-  }
-
-  const gridMaterial = new THREE.LineBasicMaterial({ color: "#6e8ca8" });
-  const gridPoints = [];
-
-  for (let ix = 0; ix <= YARD_CONFIG.width; ix += 1) {
-    const x = CONTAINER_MIN_X + ix * STEP.x;
-    gridPoints.push(new THREE.Vector3(x, 0.06, YARD_MIN_Z));
-    gridPoints.push(new THREE.Vector3(x, 0.06, YARD_MIN_Z + YARD_LENGTH_WORLD));
-  }
-
-  for (let iz = 0; iz <= YARD_CONFIG.length; iz += 1) {
-    const z = YARD_MIN_Z + iz * STEP.z;
-    gridPoints.push(new THREE.Vector3(CONTAINER_MIN_X, 0.06, z));
-    gridPoints.push(new THREE.Vector3(CONTAINER_MIN_X + YARD_WIDTH_WORLD, 0.06, z));
-  }
-
-  const gridGeometry = new THREE.BufferGeometry().setFromPoints(gridPoints);
-  const gridLines = new THREE.LineSegments(gridGeometry, gridMaterial);
-  group.add(gridLines);
-
-  const railMaterial = new THREE.MeshStandardMaterial({ color: "#5b6771", metalness: 0.35, roughness: 0.52 });
-  for (const x of [getRailX().left, getRailX().right]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.2, YARD_LENGTH_WORLD + 8), railMaterial);
-    rail.position.set(x, 0.1, 0);
-    rail.receiveShadow = true;
-    group.add(rail);
-  }
-}
-
-function buildTrucks(group) {
-  const layer = new THREE.Group();
-  group.add(layer);
-
-  return {
-    layer,
-    map: new Map(),
-    parkingLaneX: LANE_MIN_X + LANE_WIDTH_WORLD * 0.3,
-    passingLaneX: LANE_MIN_X + LANE_WIDTH_WORLD * 0.74,
-    entryZ: YARD_MIN_Z - CONTAINER_DIM.z - 10,
-    exitZ: YARD_MIN_Z + YARD_LENGTH_WORLD + CONTAINER_DIM.z + 12,
-    slotZ: Array.from({ length: DAY_SLOT_COUNT }, (_, slot) => YARD_MIN_Z + ((slot + 0.5) * YARD_LENGTH_WORLD) / DAY_SLOT_COUNT),
-  };
-}
-
-function createTruckModel({ cabColor, containerColor = null }) {
-  const group = new THREE.Group();
-  const truckWidth = Math.min(LANE_WIDTH_WORLD * 0.82, CONTAINER_DIM.x * 0.92);
-  const containerLength = CONTAINER_DIM.z * 0.93;
-  const trailerLength = containerLength + 1.35;
-  const wheelRadius = 0.18;
-  const wheelThickness = 0.12;
-  const trailerCenterZ = 0;
-  const trailerDeckTopY = wheelRadius + 0.32;
-  const cabFrontZ = trailerLength * 0.5 + 2.2;
-
-  const metalFrame = new THREE.MeshStandardMaterial({ color: "#2f3844", roughness: 0.62, metalness: 0.35 });
-  const trimMaterial = new THREE.MeshStandardMaterial({ color: "#5f6e7c", roughness: 0.5, metalness: 0.4 });
-  const cabMaterial = new THREE.MeshStandardMaterial({ color: cabColor, roughness: 0.48, metalness: 0.18 });
-
-  const trailerDeck = new THREE.Mesh(new THREE.BoxGeometry(truckWidth, 0.14, trailerLength), metalFrame);
-  trailerDeck.position.set(0, trailerDeckTopY, trailerCenterZ);
-  trailerDeck.castShadow = true;
-  group.add(trailerDeck);
-
-  const trailerSpine = new THREE.Mesh(new THREE.BoxGeometry(truckWidth * 0.22, 0.26, trailerLength * 0.96), trimMaterial);
-  trailerSpine.position.set(0, trailerDeckTopY - 0.1, trailerCenterZ);
-  trailerSpine.castShadow = true;
-  group.add(trailerSpine);
-
-  const containerHeight = CONTAINER_VISUAL_HEIGHT * 0.78;
-  const cargoAnchor = new THREE.Group();
-  cargoAnchor.position.set(0, trailerDeckTopY + containerHeight * 0.5 + 0.08, trailerCenterZ - 0.08);
-  group.add(cargoAnchor);
-
-  const kingPinPlate = new THREE.Mesh(new THREE.BoxGeometry(truckWidth * 0.4, 0.1, 0.62), trimMaterial);
-  kingPinPlate.position.set(0, trailerDeckTopY - 0.04, trailerLength * 0.5 + 0.22);
-  kingPinPlate.castShadow = true;
-  group.add(kingPinPlate);
-
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(truckWidth * 0.74, 0.22, 2.2), metalFrame);
-  chassis.position.set(0, wheelRadius + 0.18, trailerLength * 0.5 + 0.98);
-  chassis.castShadow = true;
-  group.add(chassis);
-
-  const cabLower = new THREE.Mesh(new THREE.BoxGeometry(truckWidth * 0.78, 0.82, 1.6), cabMaterial);
-  cabLower.position.set(0, wheelRadius + 0.62, cabFrontZ - 0.78);
-  cabLower.castShadow = true;
-  group.add(cabLower);
-
-  const cabUpper = new THREE.Mesh(new THREE.BoxGeometry(truckWidth * 0.72, 0.66, 1.12), cabMaterial);
-  cabUpper.position.set(0, wheelRadius + 1.2, cabFrontZ - 0.86);
-  cabUpper.castShadow = true;
-  group.add(cabUpper);
-
-  const windshield = new THREE.Mesh(
-    new THREE.BoxGeometry(truckWidth * 0.62, 0.42, 0.06),
-    new THREE.MeshStandardMaterial({ color: "#d6ecff", roughness: 0.2, metalness: 0.3 }),
-  );
-  windshield.position.set(0, wheelRadius + 1.1, cabFrontZ - 0.1);
-  windshield.castShadow = true;
-  group.add(windshield);
-
-  const grille = new THREE.Mesh(
-    new THREE.BoxGeometry(truckWidth * 0.48, 0.3, 0.08),
-    new THREE.MeshStandardMaterial({ color: "#1f2732", roughness: 0.65, metalness: 0.35 }),
-  );
-  grille.position.set(0, wheelRadius + 0.64, cabFrontZ + 0.08);
-  grille.castShadow = true;
-  group.add(grille);
-
-  const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, 18);
-  const wheelMaterial = new THREE.MeshStandardMaterial({ color: "#0b1118", roughness: 0.82, metalness: 0.2 });
-  const wheelX = [truckWidth * 0.43, -truckWidth * 0.43];
-  const trailerAxles = [
-    trailerCenterZ - trailerLength * 0.5 + 0.52,
-    trailerCenterZ - trailerLength * 0.5 + 0.96,
-    trailerCenterZ - trailerLength * 0.5 + 1.4,
-  ];
-  const tractorAxles = [trailerLength * 0.5 + 0.56, trailerLength * 0.5 + 1.78];
-  const axleZs = trailerAxles.concat(tractorAxles);
-
-  for (const x of wheelX) {
-    for (const z of axleZs) {
-      const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, wheelRadius, z);
-      wheel.castShadow = true;
-      group.add(wheel);
-    }
-  }
-
-  group.userData.cargoAnchor = cargoAnchor;
-  group.userData.cargoSize = {
-    width: truckWidth * 0.97,
-    height: containerHeight,
-    length: containerLength,
-  };
-  group.userData.cargo = null;
-
-  if (containerColor) {
-    setTruckCargo(group, containerColor);
-  }
-
-  return group;
-}
-
-function createHaulContainer(colorName, width, height, length) {
-  const color = colorToThree(colorName).clone();
-  const group = new THREE.Group();
-  const shellMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.12 });
-  const shadeMat = new THREE.MeshStandardMaterial({
-    color: color.clone().multiplyScalar(0.74),
-    roughness: 0.66,
-    metalness: 0.08,
-  });
-
-  const shell = new THREE.Mesh(new THREE.BoxGeometry(width, height, length), shellMat);
-  shell.castShadow = true;
-  group.add(shell);
-
-  const ribGeom = new THREE.BoxGeometry(0.04, height * 0.88, 0.44);
-  const ribCount = 9;
-  for (let i = 0; i < ribCount; i += 1) {
-    const z = -length * 0.42 + (i / (ribCount - 1)) * length * 0.84;
-    for (const side of [-1, 1]) {
-      const rib = new THREE.Mesh(ribGeom, shadeMat);
-      rib.position.set(side * (width * 0.51), 0, z);
-      rib.castShadow = true;
-      group.add(rib);
-    }
-  }
-
-  return group;
-}
-
-function clearTruckCargo(truck) {
-  const existing = truck.userData.cargo;
-  if (existing) {
-    truck.userData.cargoAnchor.remove(existing);
-    truck.userData.cargo = null;
-  }
-}
-
-function setTruckCargo(truck, colorName) {
-  clearTruckCargo(truck);
-  if (!colorName) {
-    return;
-  }
-  const size = truck.userData.cargoSize;
-  const cargo = createHaulContainer(colorName, size.width, size.height, size.length);
-  cargo.castShadow = true;
-  truck.userData.cargoAnchor.add(cargo);
-  truck.userData.cargo = cargo;
-}
-
 function getOrCreateTruck(truckId, companyColor) {
   const existing = world.trucks.map.get(truckId);
   if (existing) {
@@ -850,6 +591,8 @@ function getOrCreateTruck(truckId, companyColor) {
   const truck = createTruckModel({
     cabColor: companyColor || "#596b7a",
     containerColor: null,
+    metrics: SCENE_METRICS,
+    colorToThree,
   });
   truck.visible = false;
   world.trucks.map.set(truckId, truck);
@@ -862,133 +605,6 @@ function resetTruckFleet() {
     clearTruckCargo(truck);
     truck.visible = false;
   }
-}
-
-function getRailX() {
-  return {
-    left: CONTAINER_MIN_X - 1.3,
-    right: LANE_MIN_X + LANE_WIDTH_WORLD + 1.3,
-  };
-}
-
-function buildCrane(group) {
-  const rails = getRailX();
-  const centerX = (rails.left + rails.right) / 2;
-  const span = rails.right - rails.left;
-  const legDepth = STEP.z * 0.72;
-  const legHeight = YARD_CONFIG.height * STEP.y + 6.1;
-  const beamY = legHeight;
-
-  const craneGroup = new THREE.Group();
-  craneGroup.position.set(centerX, 0, stackZToWorld(0));
-  group.add(craneGroup);
-
-  const steelMaterial = new THREE.MeshStandardMaterial({ color: "#4e5965", roughness: 0.56, metalness: 0.35 });
-  const beamMaterial = new THREE.MeshStandardMaterial({ color: "#596777", roughness: 0.51, metalness: 0.38 });
-  const accentMaterial = new THREE.MeshStandardMaterial({ color: "#ffcd3e", roughness: 0.47, metalness: 0.2 });
-
-  const legGeometry = new THREE.BoxGeometry(0.75, legHeight, 0.75);
-
-  for (const side of [-1, 1]) {
-    for (const depth of [-1, 1]) {
-      const leg = new THREE.Mesh(legGeometry, steelMaterial);
-      leg.position.set((span / 2) * side, legHeight / 2, (legDepth / 2) * depth);
-      leg.castShadow = true;
-      craneGroup.add(leg);
-
-      const wheel = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.32, 0.32, 0.24, 14),
-        new THREE.MeshStandardMaterial({ color: "#121820", roughness: 0.75, metalness: 0.18 }),
-      );
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set((span / 2) * side + 0.32 * side, 0.34, (legDepth / 2) * depth);
-      wheel.castShadow = true;
-      craneGroup.add(wheel);
-
-      const wheelHub = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.12, 0.26, 10),
-        new THREE.MeshStandardMaterial({ color: "#ffcd3e", roughness: 0.42, metalness: 0.25 }),
-      );
-      wheelHub.rotation.z = Math.PI / 2;
-      wheelHub.position.copy(wheel.position);
-      craneGroup.add(wheelHub);
-    }
-  }
-
-  const topFront = new THREE.Mesh(new THREE.BoxGeometry(span + 1.2, 0.8, 0.8), beamMaterial);
-  topFront.position.set(0, beamY, legDepth / 2);
-  topFront.castShadow = true;
-  craneGroup.add(topFront);
-
-  const topBack = topFront.clone();
-  topBack.position.z = -legDepth / 2;
-  craneGroup.add(topBack);
-
-  const bridge = new THREE.Mesh(new THREE.BoxGeometry(span + 0.8, 0.52, 1.15), beamMaterial);
-  bridge.position.set(0, beamY - 1.35, 0);
-  bridge.castShadow = true;
-  craneGroup.add(bridge);
-
-  const stairs = new THREE.Mesh(new THREE.BoxGeometry(0.3, legHeight - 2.6, 0.3), accentMaterial);
-  stairs.position.set(-span / 2 - 0.48, (legHeight - 2.6) / 2 + 0.8, -legDepth / 2 + 0.55);
-  stairs.castShadow = true;
-  craneGroup.add(stairs);
-
-  const trolleyY = beamY - 1.2;
-  const trolley = new THREE.Group();
-  trolley.position.set(0, trolleyY, 0);
-  craneGroup.add(trolley);
-
-  const trolleyBody = new THREE.Mesh(
-    new THREE.BoxGeometry(2.3, 0.95, legDepth * 0.8),
-    new THREE.MeshStandardMaterial({ color: "#343d48", roughness: 0.5, metalness: 0.32 }),
-  );
-  trolleyBody.castShadow = true;
-  trolley.add(trolleyBody);
-
-  const trolleyCap = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.42, legDepth * 0.44), accentMaterial);
-  trolleyCap.position.y = 0.66;
-  trolleyCap.castShadow = true;
-  trolley.add(trolleyCap);
-
-  const spreader = new THREE.Group();
-  spreader.position.set(0, -4.8, 0);
-  trolley.add(spreader);
-
-  const spreaderBody = new THREE.Mesh(
-    new THREE.BoxGeometry(CONTAINER_DIM.x * 1.05, 0.38, CONTAINER_DIM.z * 0.92),
-    new THREE.MeshStandardMaterial({ color: "#ffbb1f", roughness: 0.45, metalness: 0.28 }),
-  );
-  spreaderBody.castShadow = true;
-  spreader.add(spreaderBody);
-
-  const ropeOffsets = [
-    new THREE.Vector3(-0.75, 0, -CONTAINER_DIM.z * 0.35),
-    new THREE.Vector3(0.75, 0, -CONTAINER_DIM.z * 0.35),
-    new THREE.Vector3(-0.75, 0, CONTAINER_DIM.z * 0.35),
-    new THREE.Vector3(0.75, 0, CONTAINER_DIM.z * 0.35),
-  ];
-
-  const ropes = ropeOffsets.map((offset) => {
-    const rope = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.028, 0.028, 1, 6),
-      new THREE.MeshStandardMaterial({ color: "#bcc9d9", roughness: 0.35, metalness: 0.4 }),
-    );
-    rope.position.copy(offset);
-    rope.castShadow = true;
-    trolley.add(rope);
-    return rope;
-  });
-
-  return {
-    group: craneGroup,
-    trolley,
-    spreader,
-    ropes,
-    centerX,
-    trolleyY,
-    travelHookY: beamY - 2.65,
-  };
 }
 
 function createContainerMesh(color) {
@@ -2151,7 +1767,7 @@ async function executeDayJob(job, token) {
 
   state.carryingId = null;
   removeContainerVisual(sourceContainer.id);
-  setTruckCargo(truck, sourceContainer.color);
+  setTruckCargo(truck, sourceContainer.color, { metrics: SCENE_METRICS, colorToThree });
   updateProjections();
   updateStats();
 

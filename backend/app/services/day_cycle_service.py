@@ -16,6 +16,7 @@ from ..core.constants import (
     DAY_TRUCK_SLOTS,
     DAY_ENERGY_WEIGHT,
     LENGTH_COST_WEIGHT,
+    NIGHT_COMPANY_TARGET_Z,
     TRUCK_FLOW_HEADWAY_SECONDS,
     TRUCK_LOAD_BUFFER_SECONDS,
     TRUCK_PICKUP_X,
@@ -69,6 +70,9 @@ def top_containers(stacks: List[List[List[dict]]]) -> List[Tuple[int, int, int, 
 def _pick_active_group_color(
     candidates: List[Tuple[int, int, int, dict]],
     remaining_by_color: Dict[str, int],
+    *,
+    current_time_s: float,
+    color_zone_by_name: Dict[str, int],
 ) -> str | None:
     """Pick next group color batch deterministically from accessible tops."""
     accessible_by_color: Dict[str, int] = {}
@@ -81,14 +85,42 @@ def _pick_active_group_color(
     if not accessible_by_color:
         return None
 
+    phase_ratio = min(0.999999, max(0.0, current_time_s / float(DAY_DURATION_SECONDS)))
+    current_zone = min(2, int(phase_ratio * 3.0))
+
     return min(
         accessible_by_color.keys(),
         key=lambda color_name: (
+            abs(color_zone_by_name.get(color_name, 1) - current_zone),
             -remaining_by_color.get(color_name, 0),
             -accessible_by_color[color_name],
             color_name,
         ),
     )
+
+
+def _preferred_color_order(remaining_by_color: Dict[str, int]) -> List[str]:
+    return sorted(
+        remaining_by_color.keys(),
+        key=lambda color_name: (
+            NIGHT_COMPANY_TARGET_Z.get(color_name, YARD_LENGTH // 2),
+            -remaining_by_color.get(color_name, 0),
+            color_name,
+        ),
+    )
+
+
+def _color_zone_map(ordered_colors: List[str]) -> Dict[str, int]:
+    if not ordered_colors:
+        return {}
+    if len(ordered_colors) == 1:
+        return {ordered_colors[0]: 0}
+
+    last_index = max(1, len(ordered_colors) - 1)
+    return {
+        color_name: min(2, round((index / last_index) * 2))
+        for index, color_name in enumerate(ordered_colors)
+    }
 
 
 def estimate_truck_timing(
@@ -121,6 +153,8 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 color_name = container["color"]
                 remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) + 1
     company_profiles = {color_name: _company_profile_for_color(color_name) for color_name in remaining_by_color}
+    preferred_color_order = _preferred_color_order(remaining_by_color)
+    color_zone_by_name = _color_zone_map(preferred_color_order)
     slot_z_map = [slot_to_stack_z(slot) for slot in range(DAY_TRUCK_SLOTS)]
     slot_free_at = [0.0] * DAY_TRUCK_SLOTS
     lane_flow_free_at = 0.0
@@ -143,7 +177,12 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
             break
 
         if active_group_color is None or remaining_by_color.get(active_group_color, 0) <= 0:
-            active_group_color = _pick_active_group_color(candidates, remaining_by_color)
+            active_group_color = _pick_active_group_color(
+                candidates,
+                remaining_by_color,
+                current_time_s=crane_time,
+                color_zone_by_name=color_zone_by_name,
+            )
             if active_group_color is None:
                 break
 
@@ -179,6 +218,9 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 )
                 tentative_load_start = max(crane_time, slot_free_at[slot_index])
                 tentative_load_end = tentative_load_start + crane_task_seconds
+                phase_ratio = min(0.999999, max(0.0, tentative_load_start / float(DAY_DURATION_SECONDS)))
+                current_zone = min(2, int(phase_ratio * 3.0))
+                phase_alignment_penalty = abs(color_zone_by_name.get(container["color"], 1) - current_zone) * 180.0
                 arrival_time, depart_time, lane_wait_seconds = estimate_truck_timing(
                     load_start=tentative_load_start,
                     load_end=tentative_load_end,
@@ -201,6 +243,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                     + lane_wait_seconds * 2.0
                     + horizontal_weighted_cost * DAY_ENERGY_WEIGHT
                     + company_switch_penalty
+                    + phase_alignment_penalty
                     + same_company_bonus
                     + rng.random() * 0.001
                 )

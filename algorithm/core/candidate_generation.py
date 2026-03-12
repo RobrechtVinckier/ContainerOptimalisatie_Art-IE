@@ -260,7 +260,9 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             )
             dquality = cfg.lam * dcl + dstack + cfg.group_fragmentation_weight * dfrag
             de = _move_energy_cost(state, src, dst, cfg)
-            operational = cfg.operational_weight * (dt + cfg.energy_weight * de)
+            expensive_axis_travel = _axis_delta(state.crane_pos, src, expensive_axis) + _axis_delta(src, dst, expensive_axis)
+            expensive_axis_penalty = max(cfg.energy_x_cost, cfg.energy_y_cost) * float(expensive_axis_travel ** 2) * 0.15
+            operational = cfg.operational_weight * (dt + cfg.energy_weight * de + expensive_axis_penalty)
             score = dquality + operational
             candidates.append(
                 Candidate(

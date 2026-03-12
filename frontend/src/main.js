@@ -1534,20 +1534,27 @@ function updateProjections(force = false) {
     { flipY: true },
   );
 
-  drawProjection("back", refs.projections.back, YARD_CONFIG.width, YARD_CONFIG.height, (x, y) => {
-    const ids = [];
-    let color = null;
-    for (let z = 0; z < YARD_CONFIG.length; z += 1) {
-      const stack = stacks[x][z];
-      if (stack[y]) {
-        ids.push(stack[y].id);
-        if (!color) {
-          color = stack[y].color;
+  drawProjection(
+    "back",
+    refs.projections.back,
+    YARD_CONFIG.width,
+    YARD_CONFIG.height,
+    (x, y) => {
+      const ids = [];
+      let color = null;
+      for (let z = 0; z < YARD_CONFIG.length; z += 1) {
+        const stack = stacks[x][z];
+        if (stack[y]) {
+          ids.push(stack[y].id);
+          if (!color) {
+            color = stack[y].color;
+          }
         }
       }
-    }
-    return { color, ids };
-  });
+      return { color, ids };
+    },
+    { flipX: true, flipY: true },
+  );
 
   drawProjection("left", refs.projections.left, YARD_CONFIG.length, YARD_CONFIG.height, (z, y) => {
     const ids = [];
@@ -1644,12 +1651,12 @@ function snapCameraToView(view) {
   switch (view) {
     case "front":
       distance = getViewFitDistance(widthSpan / 2, heightSpan / 2) + lengthSpan / 2;
-      direction.set(0, 0, -1);
+      direction.set(0, 0, 1);
       targetUp.set(0, 1, 0);
       break;
     case "back":
       distance = getViewFitDistance(widthSpan / 2, heightSpan / 2) + lengthSpan / 2;
-      direction.set(0, 0, 1);
+      direction.set(0, 0, -1);
       targetUp.set(0, 1, 0);
       break;
     case "left":

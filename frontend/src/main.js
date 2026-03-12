@@ -377,6 +377,13 @@ function setPlaybackSpeed(baseSpeed, boost = 1) {
   updatePlaybackSpeedUi();
 }
 
+function prepareForDayStart() {
+  state.clockBoost = 1;
+  setPlaybackSpeed(1, 1);
+  setClockPhaseBase(DAY_CLOCK_BASE_SECONDS);
+  setPhaseClock(0);
+}
+
 function setCyclePhase(phase, detail = "") {
   state.cyclePhase = phase;
   refs.cycleBox.dataset.phase = phase;
@@ -2015,10 +2022,8 @@ async function runDayCycle(dayCycle, token) {
   state.dayStats = dayCycle?.stats || null;
   state.activeDayJobIndex = -1;
   updateRuntimeStats();
-  setPlaybackSpeed(1, 1);
+  prepareForDayStart();
   setCyclePhase("dayRunning");
-  setClockPhaseBase(DAY_CLOCK_BASE_SECONDS);
-  setPhaseClock(0);
   state.moveCursor = 0;
   state.moveTotal = jobs.length;
   updateStats();
@@ -2177,8 +2182,9 @@ async function solveScenario() {
     return;
   }
 
+  prepareForDayStart();
   setCyclePhase("phaseShift");
-  refs.statusText.textContent = "Night cycle complete. Switching to day-cycle truck schedule...";
+  refs.statusText.textContent = "Night cycle complete. Playback reset to 1x. Starting day cycle at 06:00.";
 
   await runDayCycle(plan.dayCycle, token);
   if (token !== state.runToken) {

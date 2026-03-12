@@ -548,16 +548,14 @@ function startDepartures(runtime, time, hooks) {
     if (time + 1e-6 < actor.departureReadyAt) {
       continue;
     }
-    if (!canStartMergeOut(runtime, actor)) {
-      continue;
+    notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.departing, time, hooks);
+    actor.visible = false;
+    actor.speed = 0;
+    actor.heading = 0;
+    notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.finished, time, hooks);
+    if (hooks?.onTruckFinished) {
+      hooks.onTruckFinished(actor, time, runtime);
     }
-    startManeuver(runtime, actor, DAY_TRUCK_PHASES.mergingOut, time, {
-      duration: runtime.road.mergeDuration,
-      endX: runtime.layout.passingLaneX,
-      endZ: actor.slotZ + runtime.road.mergeAdvanceDistance,
-      endHeading: -0.24,
-      completePhase: DAY_TRUCK_PHASES.departing,
-    }, hooks);
   }
 }
 

@@ -67,6 +67,107 @@ function celestialArcPosition(progress, startZ, endZ) {
   );
 }
 
+function createCanvasTexture(size, draw) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  draw(ctx, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createSunTexture() {
+  return createCanvasTexture(256, (ctx, size) => {
+    const center = size / 2;
+    const rayCount = 12;
+    const innerRadius = 74;
+    const outerRadius = 108;
+    const raySpread = Math.PI / rayCount * 0.45;
+
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.translate(center, center);
+
+    ctx.fillStyle = "rgba(255, 140, 22, 0.92)";
+    for (let index = 0; index < rayCount; index += 1) {
+      const angle = (index / rayCount) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle - raySpread) * innerRadius, Math.sin(angle - raySpread) * innerRadius);
+      ctx.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+      ctx.lineTo(Math.cos(angle + raySpread) * innerRadius, Math.sin(angle + raySpread) * innerRadius);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const glow = ctx.createRadialGradient(0, 0, 16, 0, 0, 118);
+    glow.addColorStop(0, "rgba(255, 241, 180, 0.9)");
+    glow.addColorStop(0.42, "rgba(255, 188, 76, 0.82)");
+    glow.addColorStop(0.78, "rgba(255, 140, 22, 0.22)");
+    glow.addColorStop(1, "rgba(255, 140, 22, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, 118, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ff9120";
+    ctx.beginPath();
+    ctx.arc(0, 0, 56, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffd56e";
+    ctx.beginPath();
+    ctx.arc(-6, -6, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function createMoonTexture() {
+  return createCanvasTexture(256, (ctx, size) => {
+    const center = size / 2;
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.translate(center, center);
+
+    const glow = ctx.createRadialGradient(0, 0, 18, 0, 0, 110);
+    glow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+    glow.addColorStop(0.45, "rgba(239, 246, 255, 0.72)");
+    glow.addColorStop(0.8, "rgba(209, 226, 255, 0.18)");
+    glow.addColorStop(1, "rgba(209, 226, 255, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, 110, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(0, 0, 44, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(232, 239, 255, 0.95)";
+    ctx.beginPath();
+    ctx.arc(-8, -8, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function createCelestialSprite(texture, size) {
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+  sprite.scale.set(size, size, 1);
+  return sprite;
+}
+
 export function createLighting(scene) {
   const ambient = new THREE.AmbientLight(AMBIENT_NIGHT.clone(), 0.8);
   scene.add(ambient);
@@ -92,16 +193,10 @@ export function createLighting(scene) {
   const moonLight = new THREE.DirectionalLight(MOON_LIGHT_COLOR.clone(), 0.24);
   scene.add(moonLight);
 
-  const sun = new THREE.Mesh(
-    new THREE.SphereGeometry(2.2, 24, 24),
-    new THREE.MeshBasicMaterial({ color: "#ffd467" }),
-  );
+  const sun = createCelestialSprite(createSunTexture(), 18);
   scene.add(sun);
 
-  const moon = new THREE.Mesh(
-    new THREE.SphereGeometry(1.5, 20, 20),
-    new THREE.MeshBasicMaterial({ color: "#e9f2ff" }),
-  );
+  const moon = createCelestialSprite(createMoonTexture(), 14);
   scene.add(moon);
 
   scene.fog = new THREE.Fog(FOG_DAY.clone(), 90, 210);

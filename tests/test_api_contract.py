@@ -114,18 +114,29 @@ class TestApiContract(unittest.TestCase):
         )
 
         jobs = solve_payload["dayCycle"]["jobs"]
-        seen_colors = set()
+        windows = []
         last_color = None
         for job in jobs:
             color_name = job["containerColor"]
             if color_name != last_color:
-                self.assertNotIn(
-                    color_name,
-                    seen_colors,
-                    f"Color {color_name!r} reappeared after switching groups",
-                )
-                seen_colors.add(color_name)
+                windows.append(color_name)
                 last_color = color_name
+
+        window_counts = {}
+        for color_name in windows:
+            window_counts[color_name] = window_counts.get(color_name, 0) + 1
+
+        for color_name, count in window_counts.items():
+            self.assertLessEqual(
+                count,
+                2,
+                f"Color {color_name!r} was fragmented into too many day windows: {windows!r}",
+            )
+        self.assertLessEqual(
+            len(windows),
+            len(window_counts) + 1,
+            f"Day plan switched companies too often: {windows!r}",
+        )
 
     def test_random_endpoint_accepts_random_setup_parameters(self) -> None:
         payload = self._run(

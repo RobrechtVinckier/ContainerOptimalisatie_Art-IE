@@ -7,7 +7,6 @@ from typing import List, Tuple
 
 from ..core.constants import (
     CONTAINER_METERS,
-    NIGHT_COMPANY_TARGET_Z,
     YARD_HEIGHT,
     YARD_LENGTH,
     YARD_WIDTH,
@@ -31,6 +30,14 @@ def night_stage_for_day(
     crane_x = float(crane_start[0])
     crane_z = float(crane_start[1])
     time_used = float(start_time_s)
+
+    def top_run_length(stack: List[dict], color_name: str) -> int:
+        run = 0
+        for existing in reversed(stack):
+            if existing["color"] != color_name:
+                break
+            run += 1
+        return run
 
     def find_open_z(dst_x: int, center_z: int) -> int | None:
         for radius in range(YARD_LENGTH):
@@ -60,18 +67,15 @@ def night_stage_for_day(
         best_score = None
 
         for src_x, src_z, src_y, container in sources:
-            target_z = NIGHT_COMPANY_TARGET_Z.get(container["color"], src_z)
             for dst_x in (YARD_WIDTH - 1, YARD_WIDTH - 2):
                 if dst_x <= src_x:
                     continue
-                # Keep staging local: avoid wide jumps across the whole yard width.
-                if (dst_x - src_x) > 1:
-                    continue
-                dst_z = find_open_z(dst_x, target_z)
+                dst_z = find_open_z(dst_x, src_z)
                 if dst_z is None:
                     continue
 
                 dst_y = len(working[dst_x][dst_z])
+                dst_stack = working[dst_x][dst_z]
                 duration_seconds = crane_move_seconds(
                     crane_x=crane_x,
                     crane_z=crane_z,
@@ -87,16 +91,21 @@ def night_stage_for_day(
 
                 weighted_cost = weighted_xy_cost(src_x, src_z, dst_x, dst_z)
                 width_gain = float(dst_x - src_x) * CONTAINER_METERS["width"]
-                target_alignment_gain = max(0, abs(src_z - target_z) - abs(dst_z - target_z)) * CONTAINER_METERS[
-                    "length"
-                ]
-                length_penalty = abs(dst_z - src_z) * CONTAINER_METERS["length"] * 0.05
+                top_support = float(top_run_length(dst_stack, container["color"]))
+                same_color_stack_bonus = top_support * 0.45
+                if not dst_stack:
+                    same_color_stack_bonus += 0.25
+                elif dst_stack[-1]["color"] != container["color"]:
+                    same_color_stack_bonus -= 0.65
+                local_alignment_bonus = max(0, 2 - abs(dst_z - src_z)) * CONTAINER_METERS["length"] * 0.18
+                length_penalty = abs(dst_z - src_z) * CONTAINER_METERS["length"] * 0.16
                 stack_penalty = dst_y * 0.12
-                weighted_cost_penalty = weighted_cost * 0.08
+                weighted_cost_penalty = weighted_cost * 0.1
                 jitter = rng.random() * 0.0005
                 move_score = (
-                    width_gain * 0.9
-                    + target_alignment_gain * 0.5
+                    width_gain * 1.0
+                    + same_color_stack_bonus
+                    + local_alignment_bonus
                     - length_penalty
                     - stack_penalty
                     - weighted_cost_penalty

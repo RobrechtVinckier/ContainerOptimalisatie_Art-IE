@@ -16,7 +16,6 @@ from ..core.constants import (
     DAY_TRUCK_SLOTS,
     DAY_ENERGY_WEIGHT,
     LENGTH_COST_WEIGHT,
-    NIGHT_COMPANY_TARGET_Z,
     TRUCK_FLOW_HEADWAY_SECONDS,
     TRUCK_LOAD_BUFFER_SECONDS,
     TRUCK_PICKUP_X,
@@ -67,44 +66,88 @@ def top_containers(stacks: List[List[List[dict]]]) -> List[Tuple[int, int, int, 
     return out
 
 
+def _stack_top_run_length(stack: List[dict]) -> int:
+    if not stack:
+        return 0
+    top_color = stack[-1]["color"]
+    run = 0
+    for container in reversed(stack):
+        if container["color"] != top_color:
+            break
+        run += 1
+    return run
+
+
+def _accessible_wave_metrics(
+    stacks: List[List[List[dict]]],
+    remaining_by_color: Dict[str, int],
+) -> Dict[str, Dict[str, float]]:
+    metrics_by_color: Dict[str, Dict[str, float]] = {}
+    for source_x in range(YARD_WIDTH):
+        for source_z in range(YARD_LENGTH):
+            stack = stacks[source_x][source_z]
+            if not stack:
+                continue
+            container = stack[-1]
+            color_name = container["color"]
+            if remaining_by_color.get(color_name, 0) <= 0:
+                continue
+            metrics = metrics_by_color.setdefault(
+                color_name,
+                {
+                    "topCount": 0.0,
+                    "wavePotential": 0.0,
+                    "widthCost": 0.0,
+                },
+            )
+            metrics["topCount"] += 1.0
+            metrics["wavePotential"] += float(_stack_top_run_length(stack))
+            metrics["widthCost"] += weighted_xy_cost(source_x, source_z, TRUCK_PICKUP_X, source_z)
+    return metrics_by_color
+
+
 def _pick_active_group_color(
-    candidates: List[Tuple[int, int, int, dict]],
+    stacks: List[List[List[dict]]],
     remaining_by_color: Dict[str, int],
     *,
     current_time_s: float,
     color_zone_by_name: Dict[str, int],
 ) -> str | None:
-    """Pick next group color batch deterministically from accessible tops."""
-    accessible_by_color: Dict[str, int] = {}
-    for _x, _z, _y, container in candidates:
-        color_name = container["color"]
-        if remaining_by_color.get(color_name, 0) <= 0:
-            continue
-        accessible_by_color[color_name] = accessible_by_color.get(color_name, 0) + 1
-
-    if not accessible_by_color:
+    """Pick the next company batch using accessible wave potential, not yard clustering."""
+    accessible_metrics = _accessible_wave_metrics(stacks, remaining_by_color)
+    if not accessible_metrics:
         return None
 
     phase_ratio = min(0.999999, max(0.0, current_time_s / float(DAY_DURATION_SECONDS)))
     current_zone = min(2, int(phase_ratio * 3.0))
 
     return min(
-        accessible_by_color.keys(),
+        accessible_metrics.keys(),
         key=lambda color_name: (
             abs(color_zone_by_name.get(color_name, 1) - current_zone),
+            max(0.0, remaining_by_color.get(color_name, 0) - accessible_metrics[color_name]["wavePotential"]),
+            -accessible_metrics[color_name]["wavePotential"],
+            -accessible_metrics[color_name]["topCount"],
+            accessible_metrics[color_name]["widthCost"] / max(1.0, accessible_metrics[color_name]["topCount"]),
             -remaining_by_color.get(color_name, 0),
-            -accessible_by_color[color_name],
             color_name,
         ),
     )
 
 
-def _preferred_color_order(remaining_by_color: Dict[str, int]) -> List[str]:
+def _preferred_color_order_from_access(stacks: List[List[List[dict]]], remaining_by_color: Dict[str, int]) -> List[str]:
+    accessible_metrics = _accessible_wave_metrics(stacks, remaining_by_color)
     return sorted(
         remaining_by_color.keys(),
         key=lambda color_name: (
-            NIGHT_COMPANY_TARGET_Z.get(color_name, YARD_LENGTH // 2),
-            -remaining_by_color.get(color_name, 0),
+            max(0.0, remaining_by_color.get(color_name, 0) - accessible_metrics.get(color_name, {}).get("wavePotential", 0.0)),
+            -(accessible_metrics.get(color_name, {}).get("wavePotential", 0.0)),
+            -(accessible_metrics.get(color_name, {}).get("topCount", 0.0)),
+            (
+                accessible_metrics.get(color_name, {}).get("widthCost", 0.0)
+                / max(1.0, accessible_metrics.get(color_name, {}).get("topCount", 0.0))
+            ),
+            -(remaining_by_color.get(color_name, 0)),
             color_name,
         ),
     )
@@ -179,7 +222,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) + 1
     total_by_color = dict(remaining_by_color)
     company_profiles = {color_name: _company_profile_for_color(color_name) for color_name in remaining_by_color}
-    preferred_color_order = _preferred_color_order(remaining_by_color)
+    preferred_color_order = _preferred_color_order_from_access(working, remaining_by_color)
     color_zone_by_name = _color_zone_map(preferred_color_order)
     scheduled_trips_by_color: Dict[str, int] = {color_name: 0 for color_name in remaining_by_color}
     slot_z_map = [slot_to_stack_z(slot) for slot in range(DAY_TRUCK_SLOTS)]
@@ -217,7 +260,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
             or active_group_color not in accessible_colors
         ):
             active_group_color = _pick_active_group_color(
-                candidates,
+                working,
                 remaining_by_color,
                 current_time_s=crane_time,
                 color_zone_by_name=color_zone_by_name,
@@ -271,8 +314,8 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 tentative_load_end = tentative_load_start + crane_task_seconds
                 phase_ratio = min(0.999999, max(0.0, tentative_load_start / float(DAY_DURATION_SECONDS)))
                 current_zone = min(2, int(phase_ratio * 3.0))
-                phase_alignment_penalty = abs(color_zone_by_name.get(container["color"], 1) - current_zone) * 180.0
-                schedule_spread_penalty = abs(tentative_load_start - target_load_start) * 0.06
+                phase_alignment_penalty = abs(color_zone_by_name.get(container["color"], 1) - current_zone) * 320.0
+                schedule_spread_penalty = abs(tentative_load_start - target_load_start) * 0.12
                 arrival_time, depart_time, lane_wait_seconds = estimate_truck_timing(
                     load_start=tentative_load_start,
                     load_end=tentative_load_end,
@@ -281,7 +324,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                 )
                 if depart_time > DAY_DURATION_SECONDS:
                     continue
-                same_company_bonus = -0.35 if jobs and jobs[-1]["containerColor"] == container["color"] else 0.0
+                same_company_bonus = -45.0 if jobs and jobs[-1]["containerColor"] == container["color"] else 0.0
                 company_switch_penalty = 0.0
                 if jobs and jobs[-1]["containerColor"] != container["color"]:
                     previous_color = jobs[-1]["containerColor"]

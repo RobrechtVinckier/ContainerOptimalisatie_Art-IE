@@ -62,7 +62,13 @@ function createHaulContainer(colorName, metrics, colorToThree) {
   const length = containerDim.z * 0.93;
   const color = colorToThree(colorName).clone();
   const group = new THREE.Group();
-  const shellMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.12 });
+  const shellMat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.6,
+    metalness: 0.12,
+    emissive: color.clone().multiplyScalar(0.14),
+    emissiveIntensity: 0.28,
+  });
   const shadeMat = new THREE.MeshStandardMaterial({
     color: color.clone().multiplyScalar(0.74),
     roughness: 0.66,

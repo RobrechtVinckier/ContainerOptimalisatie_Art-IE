@@ -296,6 +296,7 @@ const state = {
   algoSyncQueued: false,
   algoSettingsMode: "basic",
   legendSignature: "",
+  cameraTransition: null,
 };
 
 const threeColorCache = new Map();
@@ -874,6 +875,33 @@ function updateSimulationClock(deltaSeconds) {
   setPhaseClock(state.phaseClockSeconds + delta * multiplier);
 }
 
+function updateCameraTransition(deltaSeconds) {
+  const transition = state.cameraTransition;
+  if (!transition) {
+    return;
+  }
+
+  transition.elapsed = Math.min(transition.duration, transition.elapsed + Math.max(0, Number(deltaSeconds) || 0));
+  const rawT = transition.duration <= 0 ? 1 : transition.elapsed / transition.duration;
+  const eased = rawT < 0.5
+    ? 4 * rawT * rawT * rawT
+    : 1 - ((-2 * rawT + 2) ** 3) / 2;
+
+  world.camera.position.lerpVectors(transition.startPosition, transition.endPosition, eased);
+  world.controls.target.lerpVectors(transition.startTarget, transition.endTarget, eased);
+  world.camera.up.lerpVectors(transition.startUp, transition.endUp, eased).normalize();
+  world.camera.lookAt(world.controls.target);
+
+  if (rawT >= 1) {
+    world.camera.position.copy(transition.endPosition);
+    world.controls.target.copy(transition.endTarget);
+    world.camera.up.copy(transition.endUp);
+    world.camera.lookAt(world.controls.target);
+    world.camera.updateProjectionMatrix();
+    state.cameraTransition = null;
+  }
+}
+
 function startRenderLoop() {
   const render = () => {
     const delta = world.clock.getDelta();
@@ -882,6 +910,7 @@ function startRenderLoop() {
       phaseClockBase: state.phaseClockBase,
       phaseClockSeconds: state.phaseClockSeconds,
     });
+    updateCameraTransition(delta);
     world.controls.update();
     animateTrucks(delta);
     applyCranePose();
@@ -1328,49 +1357,56 @@ function snapCameraToView(view) {
   const lengthSpan = YARD_LENGTH_WORLD + 8.6;
   const center = new THREE.Vector3(CONTAINER_MIN_X + TOTAL_WIDTH_WORLD / 2, heightSpan * 0.42, 0);
   const direction = new THREE.Vector3();
+  const startUp = world.camera.up.clone();
+  const targetUp = startUp.clone();
   let distance = 24;
 
   switch (view) {
     case "front":
       distance = getViewFitDistance(widthSpan / 2, heightSpan / 2) + lengthSpan / 2;
       direction.set(0, 0, -1);
-      world.camera.up.set(0, 1, 0);
+      targetUp.set(0, 1, 0);
       break;
     case "back":
       distance = getViewFitDistance(widthSpan / 2, heightSpan / 2) + lengthSpan / 2;
       direction.set(0, 0, 1);
-      world.camera.up.set(0, 1, 0);
+      targetUp.set(0, 1, 0);
       break;
     case "left":
       distance = getViewFitDistance(lengthSpan / 2, heightSpan / 2);
       direction.set(-1, 0, 0);
-      world.camera.up.set(0, 1, 0);
+      targetUp.set(0, 1, 0);
       break;
     case "right":
       distance = getViewFitDistance(lengthSpan / 2, heightSpan / 2);
       direction.set(1, 0, 0);
-      world.camera.up.set(0, 1, 0);
+      targetUp.set(0, 1, 0);
       break;
     case "top":
       distance = getViewFitDistance(widthSpan / 2, lengthSpan / 2);
       direction.set(0, 1, 0.0002);
-      world.camera.up.set(0, 0, -1);
+      targetUp.set(0, 0, -1);
       break;
     case "bottom":
       distance = getViewFitDistance(widthSpan / 2, lengthSpan / 2);
       direction.set(0, -1, 0.0002);
-      world.camera.up.set(0, 0, 1);
+      targetUp.set(0, 0, 1);
       break;
     default:
       return;
   }
 
   const newPosition = center.clone().add(direction.normalize().multiplyScalar(distance));
-  world.controls.target.copy(center);
-  world.camera.position.copy(newPosition);
-  world.camera.lookAt(center);
-  world.camera.updateProjectionMatrix();
-  world.controls.update();
+  state.cameraTransition = {
+    startPosition: world.camera.position.clone(),
+    endPosition: newPosition,
+    startTarget: world.controls.target.clone(),
+    endTarget: center.clone(),
+    startUp,
+    endUp: targetUp.normalize(),
+    elapsed: 0,
+    duration: 0.72,
+  };
   refs.statusText.textContent = `Camera aligned to ${view} view.`;
 }
 

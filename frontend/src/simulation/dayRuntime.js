@@ -31,6 +31,9 @@ const DEFAULTS = Object.freeze({
   entrySpacing: 9.4,
   mergeClearanceAhead: 8.8,
   mergeClearanceBehind: 15.0,
+  mergePriorityStopDistance: 3.6,
+  parkingPriorityStopDistance: 3.2,
+  stuckTimeoutSeconds: 16.0,
   parkingDuration: 2.5,
   mergeDuration: 2.2,
   mergeAdvanceDistance: 4.1,
@@ -118,6 +121,7 @@ function createTruckActor(job, index, layout, road) {
     nominalRoadSpeed: road.nominalRoadSpeed,
     phase: DAY_TRUCK_PHASES.scheduled,
     phaseChangedAt: 0,
+    lastProgressAt: 0,
     parkedAt: null,
     loadedAt: null,
     departureReadyAt: Number.isFinite(job.departTime) ? Number(job.departTime) : 0,
@@ -136,6 +140,7 @@ function notifyPhaseChange(runtime, actor, nextPhase, time, hooks) {
   const previousPhase = actor.phase;
   actor.phase = nextPhase;
   actor.phaseChangedAt = time;
+  actor.lastProgressAt = time;
   if (hooks?.onTruckPhaseChange) {
     hooks.onTruckPhaseChange(actor, previousPhase, nextPhase, time, runtime);
   }
@@ -166,6 +171,33 @@ function getLaneActors(runtime) {
       }
       return left.jobIndex - right.jobIndex;
     });
+}
+
+function noteActorProgress(actor, time, startX, startZ) {
+  const moved = Math.abs(actor.x - startX) > 0.03 || Math.abs(actor.z - startZ) > 0.03;
+  if (moved) {
+    actor.lastProgressAt = time;
+  }
+}
+
+function actorIdleSeconds(actor, time) {
+  return Math.max(0, time - Math.max(actor.phaseChangedAt, actor.lastProgressAt));
+}
+
+function laneClearances(runtime, zCenter, ignoredActor = null) {
+  let ahead = Number.POSITIVE_INFINITY;
+  let behind = Number.POSITIVE_INFINITY;
+  for (const actor of runtime.truckActors) {
+    if (actor === ignoredActor || !actor.visible || !PHASES_USING_LANE.has(actor.phase)) {
+      continue;
+    }
+    if (actor.z >= zCenter) {
+      ahead = Math.min(ahead, actor.z - zCenter);
+    } else {
+      behind = Math.min(behind, zCenter - actor.z);
+    }
+  }
+  return { ahead, behind };
 }
 
 function canEnterRoad(runtime) {
@@ -200,13 +232,33 @@ function laneWindowClear(runtime, zCenter, behindDistance, aheadDistance, ignore
 }
 
 function canStartParking(runtime, actor) {
-  return !bayOccupantConflict(runtime, actor)
-    && laneWindowClear(runtime, actor.slotZ, runtime.road.stopDistance, runtime.road.stopDistance * 0.7, actor);
+  if (bayOccupantConflict(runtime, actor)) {
+    return false;
+  }
+
+  if (laneWindowClear(runtime, actor.slotZ, runtime.road.stopDistance, runtime.road.stopDistance * 0.7, actor)) {
+    return true;
+  }
+
+  if (actorIdleSeconds(actor, runtime.currentSimTime) < runtime.road.stuckTimeoutSeconds) {
+    return false;
+  }
+
+  const { ahead, behind } = laneClearances(runtime, actor.slotZ, actor);
+  return ahead >= runtime.road.parkingPriorityStopDistance && behind >= runtime.road.parkingPriorityStopDistance;
 }
 
 function canStartMergeOut(runtime, actor) {
-  return !bayOccupantConflict(runtime, actor)
-    && laneWindowClear(runtime, actor.slotZ, runtime.road.mergeClearanceBehind, runtime.road.mergeClearanceAhead, actor);
+  if (laneWindowClear(runtime, actor.slotZ, runtime.road.mergeClearanceBehind, runtime.road.mergeClearanceAhead, actor)) {
+    return true;
+  }
+
+  if (actorIdleSeconds(actor, runtime.currentSimTime) < runtime.road.stuckTimeoutSeconds) {
+    return false;
+  }
+
+  const { ahead, behind } = laneClearances(runtime, actor.slotZ, actor);
+  return ahead >= runtime.road.mergePriorityStopDistance && behind >= runtime.road.mergePriorityStopDistance;
 }
 
 function spawnReadyTrucks(runtime, time, hooks) {
@@ -225,6 +277,7 @@ function spawnReadyTrucks(runtime, time, hooks) {
     actor.z = runtime.layout.entryZ;
     actor.heading = 0;
     actor.speed = actor.nominalRoadSpeed * 0.55;
+    actor.lastProgressAt = time;
     notifyPhaseChange(runtime, actor, DAY_TRUCK_PHASES.enteringRoad, time, hooks);
   }
 }
@@ -244,6 +297,8 @@ function updateLaneTraffic(runtime, dt, time, hooks) {
   for (let index = 0; index < laneActors.length; index += 1) {
     const actor = laneActors[index];
     const lead = index === 0 ? null : laneActors[index - 1];
+    const startX = actor.x;
+    const startZ = actor.z;
     const targetZ = targetRoadZForActor(runtime, actor);
     const remainingDistance = Math.max(0, targetZ - actor.z);
     let desiredSpeed = actor.phase === DAY_TRUCK_PHASES.mergingOut ? 0 : actor.nominalRoadSpeed;
@@ -273,6 +328,7 @@ function updateLaneTraffic(runtime, dt, time, hooks) {
     actor.z += travel;
     actor.x = runtime.layout.passingLaneX;
     actor.heading = 0;
+    noteActorProgress(actor, time, startX, startZ);
 
     if (
       actor.phase === DAY_TRUCK_PHASES.enteringRoad
@@ -313,12 +369,15 @@ function updateManeuvers(runtime, time, hooks) {
       continue;
     }
     const maneuver = actor.maneuver;
+    const startX = actor.x;
+    const startZ = actor.z;
     const t = clamp01((time - maneuver.startTime) / maneuver.duration);
     const eased = easeInOutCubic(t);
     actor.x = lerp(maneuver.startX, maneuver.endX, eased);
     actor.z = lerp(maneuver.startZ, maneuver.endZ, eased);
     actor.heading = lerp(maneuver.startHeading, maneuver.endHeading, eased);
     actor.speed = 0;
+    noteActorProgress(actor, time, startX, startZ);
 
     if (t < 1) {
       continue;
@@ -495,6 +554,9 @@ export function createDayRuntime(dayCycle, config = {}) {
     entrySpacing: Number(config.entrySpacing) || DEFAULTS.entrySpacing,
     mergeClearanceAhead: Number(config.mergeClearanceAhead) || DEFAULTS.mergeClearanceAhead,
     mergeClearanceBehind: Number(config.mergeClearanceBehind) || DEFAULTS.mergeClearanceBehind,
+    mergePriorityStopDistance: Number(config.mergePriorityStopDistance) || DEFAULTS.mergePriorityStopDistance,
+    parkingPriorityStopDistance: Number(config.parkingPriorityStopDistance) || DEFAULTS.parkingPriorityStopDistance,
+    stuckTimeoutSeconds: Number(config.stuckTimeoutSeconds) || DEFAULTS.stuckTimeoutSeconds,
     parkingDuration: Number(config.parkingDuration) || DEFAULTS.parkingDuration,
     mergeDuration: Number(config.mergeDuration) || DEFAULTS.mergeDuration,
     mergeAdvanceDistance: Number(config.mergeAdvanceDistance) || DEFAULTS.mergeAdvanceDistance,
@@ -523,6 +585,7 @@ export function createDayRuntime(dayCycle, config = {}) {
       completedJobs: 0,
       activeJobIndex: -1,
     },
+    currentSimTime: 0,
     lastSimTime: 0,
     completed: jobs.length === 0,
     statusText: "",
@@ -545,16 +608,18 @@ export function advanceDayRuntime(runtime, targetTime, hooks = {}) {
   while (cursor + 1e-6 < safeTarget && steps < runtime.road.maxFixedStepsPerFrame) {
     const nextTime = Math.min(safeTarget, cursor + dynamicStep);
     const dt = nextTime - cursor;
+    runtime.currentSimTime = nextTime;
     spawnReadyTrucks(runtime, nextTime, hooks);
     updateManeuvers(runtime, nextTime, hooks);
+    startDepartures(runtime, nextTime, hooks);
     updateLaneTraffic(runtime, dt, nextTime, hooks);
     updateCrane(runtime, nextTime, hooks);
-    startDepartures(runtime, nextTime, hooks);
     syncCompletion(runtime);
     cursor = nextTime;
     steps += 1;
   }
 
+  runtime.currentSimTime = safeTarget;
   runtime.lastSimTime = safeTarget;
 }
 

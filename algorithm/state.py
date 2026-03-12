@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 XY = Tuple[int, int]
+PREFERRED_TOP_WAVE_DEPTH = 3
 
 
 def travel_time(a: XY, b: XY) -> float:
@@ -135,11 +136,12 @@ class State:
     @staticmethod
     def _stack_top_group_mismatch_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:
         """
-        Penalty for a short top-access run.
+        Penalty for a short useful top-access chunk.
 
         The accessible company wave is the contiguous run of same-group containers
         from the top downward. Short runs are operationally bad because they force
-        immediate company switching during the day.
+        immediate company switching during the day. Returns diminish once the
+        accessible chunk is already operationally useful.
         """
         if not stack:
             return 0.0
@@ -149,7 +151,8 @@ class State:
             if group[cid] != top_group:
                 break
             top_run += 1
-        return float(len(stack) - top_run)
+        useful_target = min(len(stack), PREFERRED_TOP_WAVE_DEPTH)
+        return float(max(0, useful_target - top_run))
 
     @staticmethod
     def _stack_group_transitions_from_stack(stack: Sequence[int], group: Sequence[int]) -> float:

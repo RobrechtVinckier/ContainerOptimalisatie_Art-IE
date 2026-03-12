@@ -19,6 +19,8 @@ from ..core.constants import (
     CONTAINER_METERS,
 )
 
+PREFERRED_TOP_WAVE_DEPTH = 3
+
 
 def _hsv_hex(h: float, s: float, v: float) -> str:
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
@@ -170,9 +172,10 @@ def summarize_stacks(stacks: List[List[List[dict]]], *, score_weights: Optional[
                     if container["color"] != top_color:
                         break
                     top_run += 1
-                top_mismatch_penalty += float(n - top_run)
+                useful_target = min(n, PREFERRED_TOP_WAVE_DEPTH)
+                top_mismatch_penalty += float(max(0, useful_target - top_run))
                 impurity_penalty += float(n - max(counts_in_stack.values()))
-                max_top_mismatch += float(max(0, n - 1))
+                max_top_mismatch += float(useful_target)
                 max_transitions += float(max(0, n - 1))
                 max_impurity += float(max(0, n - 1))
 

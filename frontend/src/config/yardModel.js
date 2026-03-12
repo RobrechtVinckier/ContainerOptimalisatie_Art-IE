@@ -22,6 +22,8 @@ const DEFAULT_PLACEMENT_SCORE_WEIGHTS = Object.freeze({
   fragmentation: 0.1,
 });
 
+const PREFERRED_TOP_WAVE_DEPTH = 3;
+
 export const COLOR_PALETTE = Object.freeze({
   red: "#c63a3c",
   green: "#2d9f63",
@@ -192,9 +194,10 @@ export function summarizeStacks(stacks, scoreWeights = null) {
           }
           topRun += 1;
         }
-        topMismatchPenalty += n - topRun;
+        const usefulTarget = Math.min(n, PREFERRED_TOP_WAVE_DEPTH);
+        topMismatchPenalty += Math.max(0, usefulTarget - topRun);
         impurityPenalty += n - Math.max(...Object.values(countsInStack));
-        maxTopMismatch += Math.max(0, n - 1);
+        maxTopMismatch += usefulTarget;
         maxTransitions += Math.max(0, n - 1);
         maxImpurity += Math.max(0, n - 1);
         maxRehandles += (n * (n - 1)) / 2;

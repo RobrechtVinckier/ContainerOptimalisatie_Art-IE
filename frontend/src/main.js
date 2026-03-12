@@ -172,8 +172,8 @@ app.innerHTML = `
               <p>Basic mode is tuned for presentation. Advanced mode exposes the search internals.</p>
             </div>
             <div class="algo-mode-switch" role="tablist" aria-label="Algorithm settings detail level">
-              <button id="algo-mode-basic" class="algo-mode-btn is-active" type="button" data-settings-mode="basic">Basic Settings</button>
-              <button id="algo-mode-advanced" class="algo-mode-btn" type="button" data-settings-mode="advanced">Advanced Settings</button>
+              <button id="algo-mode-basic" class="algo-mode-btn is-active" type="button" data-settings-mode="basic">Basic Only</button>
+              <button id="algo-mode-advanced" class="algo-mode-btn" type="button" data-settings-mode="advanced" aria-expanded="false">Show Advanced</button>
             </div>
           </div>
           <div id="algo-panel-basic" class="algo-grid">
@@ -183,15 +183,18 @@ app.innerHTML = `
             <label>${fieldLabel("Rehandle Penalty", "Penalty for mixed stacks that are likely to require extra reshuffles later in the day.")}<input id="algo-stack-rehandle-weight" type="number" min="0" step="0.1" value="1.0" /></label>
             <label>${fieldLabel("Day Prep Priority", "Penalty for containers buried under other groups. Higher values keep soon-to-load containers more accessible for the day shift.")}<input id="algo-buried-foreign-weight" type="number" min="0" step="0.1" value="2.0" /></label>
           </div>
-          <div id="algo-panel-advanced" class="algo-grid" hidden>
-            <label>${fieldLabel("Tabu Iterations", "Number of search iterations in the tabu phase. More iterations can improve solutions but take longer.")}<input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
-            <label>${fieldLabel("Tabu Length", "How long recent moves stay temporarily forbidden to avoid immediate cycling.")}<input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
-            <label>${fieldLabel("Search Radius", "How far the candidate destination search may look from a group center on the width axis.")}<input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
-            <label>${fieldLabel("Focus Groups", "How many of the most spread-out groups are prioritized when generating candidate moves.")}<input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
-            <label>${fieldLabel("Top Mismatch Weight", "Penalty for stacks whose top container does not match the dominant group below it.")}<input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.1" /></label>
-            <label>${fieldLabel("Impurity Weight", "Penalty for stacks that mix multiple groups instead of staying compositionally clean.")}<input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="1.4" /></label>
-            <label>${fieldLabel("Fragmentation Weight", "Penalty for spreading the same group across too many stacks instead of keeping it compact.")}<input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.9" /></label>
-            <label>${fieldLabel("Quality Tie Epsilon", "If two moves are almost equal in quality, the optimizer uses this threshold before preferring the cheaper operational move.")}<input id="algo-quality-tie-eps" type="number" min="0" step="0.000001" value="0.000000001" /></label>
+          <div id="algo-panel-advanced-wrap" class="algo-advanced-shell" hidden>
+            <div class="algo-advanced-title">Advanced Search Controls</div>
+            <div id="algo-panel-advanced" class="algo-grid algo-grid-advanced">
+              <label>${fieldLabel("Tabu Iterations", "Number of search iterations in the tabu phase. More iterations can improve solutions but take longer.")}<input id="algo-tabu-iters" type="number" min="1" step="1" value="1500" /></label>
+              <label>${fieldLabel("Tabu Length", "How long recent moves stay temporarily forbidden to avoid immediate cycling.")}<input id="algo-tabu-len" type="number" min="1" step="1" value="200" /></label>
+              <label>${fieldLabel("Search Radius", "How far the candidate destination search may look from a group center on the width axis.")}<input id="algo-x-radius" type="number" min="0" step="1" value="2" /></label>
+              <label>${fieldLabel("Focus Groups", "How many of the most spread-out groups are prioritized when generating candidate moves.")}<input id="algo-top-groups" type="number" min="1" step="1" value="5" /></label>
+              <label>${fieldLabel("Top Mismatch Weight", "Penalty for stacks whose top container does not match the dominant group below it.")}<input id="algo-stack-top-mismatch-weight" type="number" min="0" step="0.1" value="1.1" /></label>
+              <label>${fieldLabel("Impurity Weight", "Penalty for stacks that mix multiple groups instead of staying compositionally clean.")}<input id="algo-stack-impurity-weight" type="number" min="0" step="0.1" value="1.4" /></label>
+              <label>${fieldLabel("Fragmentation Weight", "Penalty for spreading the same group across too many stacks instead of keeping it compact.")}<input id="algo-group-fragmentation-weight" type="number" min="0" step="0.1" value="0.9" /></label>
+              <label>${fieldLabel("Quality Tie Epsilon", "If two moves are almost equal in quality, the optimizer uses this threshold before preferring the cheaper operational move.")}<input id="algo-quality-tie-eps" type="number" min="0" step="0.000001" value="0.000000001" /></label>
+            </div>
           </div>
         </section>
 
@@ -223,8 +226,10 @@ const refs = {
   randomMinPerGroup: document.getElementById("random-min-per-group"),
   randomMaxPerGroup: document.getElementById("random-max-per-group"),
   algoSettingsPanel: document.getElementById("algo-settings-panel"),
-  algoModeButtons: Array.from(document.querySelectorAll("[data-settings-mode]")),
+  algoModeBasic: document.getElementById("algo-mode-basic"),
+  algoModeAdvanced: document.getElementById("algo-mode-advanced"),
   algoPanelBasic: document.getElementById("algo-panel-basic"),
+  algoPanelAdvancedWrap: document.getElementById("algo-panel-advanced-wrap"),
   algoPanelAdvanced: document.getElementById("algo-panel-advanced"),
   algoLam: document.getElementById("algo-lam"),
   algoEnergyWeight: document.getElementById("algo-energy-weight"),
@@ -357,11 +362,12 @@ function setAlgorithmSettingsMode(mode) {
   const nextMode = mode === "advanced" ? "advanced" : "basic";
   state.algoSettingsMode = nextMode;
   refs.algoSettingsPanel.dataset.mode = nextMode;
-  refs.algoPanelBasic.hidden = nextMode !== "basic";
-  refs.algoPanelAdvanced.hidden = nextMode !== "advanced";
-  for (const button of refs.algoModeButtons) {
-    button.classList.toggle("is-active", button.dataset.settingsMode === nextMode);
-  }
+  refs.algoPanelBasic.hidden = false;
+  refs.algoPanelAdvancedWrap.hidden = nextMode !== "advanced";
+  refs.algoModeBasic.classList.toggle("is-active", nextMode === "basic");
+  refs.algoModeAdvanced.classList.toggle("is-active", nextMode === "advanced");
+  refs.algoModeAdvanced.textContent = nextMode === "advanced" ? "Hide Advanced" : "Show Advanced";
+  refs.algoModeAdvanced.setAttribute("aria-expanded", String(nextMode === "advanced"));
 }
 
 function setPhaseClock(elapsedSeconds) {
@@ -539,11 +545,13 @@ for (const field of [
   });
 }
 
-for (const button of refs.algoModeButtons) {
-  button.addEventListener("click", () => {
-    setAlgorithmSettingsMode(button.dataset.settingsMode);
-  });
-}
+refs.algoModeBasic.addEventListener("click", () => {
+  setAlgorithmSettingsMode("basic");
+});
+
+refs.algoModeAdvanced.addEventListener("click", () => {
+  setAlgorithmSettingsMode(state.algoSettingsMode === "advanced" ? "basic" : "advanced");
+});
 
 for (const eyeButton of refs.eyeButtons) {
   eyeButton.addEventListener("click", () => {

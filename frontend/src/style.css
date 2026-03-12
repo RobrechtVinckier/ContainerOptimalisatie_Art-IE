@@ -503,6 +503,28 @@ body {
   gap: 8px;
 }
 
+.algo-advanced-shell {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #c1d4e5;
+}
+
+.algo-advanced-title {
+  margin-bottom: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5d7e9d;
+}
+
+.algo-grid-advanced {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #c8d8e7;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(235, 242, 249, 0.92));
+}
+
 .algo-grid label {
   display: grid;
   gap: 4px;

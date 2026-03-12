@@ -203,7 +203,19 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
         if not candidates:
             break
 
-        if active_group_color is None or remaining_by_color.get(active_group_color, 0) <= 0:
+        accessible_colors = {
+            container["color"]
+            for _source_x, _source_z, _source_y, container in candidates
+            if remaining_by_color.get(container["color"], 0) > 0
+        }
+        if not accessible_colors:
+            break
+
+        if (
+            active_group_color is None
+            or remaining_by_color.get(active_group_color, 0) <= 0
+            or active_group_color not in accessible_colors
+        ):
             active_group_color = _pick_active_group_color(
                 candidates,
                 remaining_by_color,
@@ -219,8 +231,10 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
             if container["color"] == active_group_color
         ]
         if not group_candidates:
-            # Strict batch policy: do not mix groups while the active group still has containers.
-            break
+            # If the current company becomes buried under other groups, switch to
+            # another accessible company instead of starving the rest of the day plan.
+            active_group_color = None
+            continue
 
         best_choice = None
         best_score = None

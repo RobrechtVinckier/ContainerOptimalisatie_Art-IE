@@ -40,7 +40,6 @@ const MAX_RANDOM_CONTAINER_COUNT = YARD_CONFIG.width * YARD_CONFIG.length * YARD
 const MAX_RANDOM_MOVABLE_CONTAINER_COUNT = Math.max(1, MAX_RANDOM_CONTAINER_COUNT - 1);
 const DEFAULT_RANDOM_GROUPS = 3;
 const FAST_FORWARD_SPEED_THRESHOLD = 70;
-const FAST_FORWARD_YIELD_MS = 16;
 const FAST_FORWARD_PROJECTION_THROTTLE_MS = 90;
 const RANDOM_REGENERATE_DEBOUNCE_MS = 380;
 const ALGO_SETTINGS_SYNC_DEBOUNCE_MS = 450;
@@ -84,8 +83,8 @@ app.innerHTML = `
       <button id="pause-btn" class="btn" disabled>Pause</button>
       <label class="speed-box" for="speed-slider">
         <span>Playback Speed</span>
-        <input id="speed-slider" type="range" min="0.25" max="100" step="0.05" value="1" />
-        <output id="speed-value">1.00x</output>
+        <input id="speed-slider" type="range" min="1" max="100" step="1" value="1" />
+        <output id="speed-value">1x</output>
       </label>
       <label class="pass-box" for="passthrough-toggle">
         <input id="passthrough-toggle" type="checkbox" />
@@ -275,7 +274,8 @@ const state = {
   nightStats: null,
   dayCyclePlan: null,
   dayStats: null,
-  lastFastForwardYieldAt: 0,
+  clockRunning: false,
+  clockBoost: 1,
   lastProjectionDrawAt: 0,
   randomRegenerateTimer: null,
   pendingRandomSetup: null,
@@ -475,8 +475,9 @@ refs.pauseBtn.addEventListener("click", () => {
 });
 
 refs.speedSlider.addEventListener("input", (event) => {
-  state.speed = Number(event.target.value);
-  refs.speedValue.textContent = `${state.speed.toFixed(2)}x`;
+  state.speed = Math.max(1, Math.round(Number(event.target.value) || 1));
+  event.target.value = String(state.speed);
+  refs.speedValue.textContent = `${state.speed}x`;
 });
 
 for (const field of [
@@ -855,9 +856,22 @@ function animateTrucks(deltaSeconds) {
   void deltaSeconds;
 }
 
+function updateSimulationClock(deltaSeconds) {
+  if (!state.clockRunning || state.paused) {
+    return;
+  }
+  const delta = Math.max(0, Number(deltaSeconds) || 0);
+  if (delta <= 0) {
+    return;
+  }
+  const multiplier = Math.max(1, state.speed) * Math.max(1, state.clockBoost || 1);
+  setPhaseClock(state.phaseClockSeconds + delta * multiplier);
+}
+
 function startRenderLoop() {
   const render = () => {
     const delta = world.clock.getDelta();
+    updateSimulationClock(delta);
     world.controls.update();
     animateTrucks(delta);
     applyCranePose();
@@ -1387,6 +1401,8 @@ async function generateScenario(preparedRandomSetup = null) {
   const token = ++state.runToken;
   state.solving = false;
   state.paused = false;
+  state.clockRunning = false;
+  state.clockBoost = 1;
   state.nightStats = null;
   state.dayCyclePlan = null;
   state.dayStats = null;
@@ -1442,148 +1458,119 @@ function cancelRun() {
   state.runToken += 1;
   state.solving = false;
   state.paused = false;
+  state.clockRunning = false;
+  state.clockBoost = 1;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
   resetTruckFleet();
 }
 
-function tween(durationMs, onFrame, token) {
-  if (state.speed >= FAST_FORWARD_SPEED_THRESHOLD) {
-    if (token !== state.runToken) {
-      return Promise.resolve(false);
-    }
-    if (state.paused) {
-      return new Promise((resolve) => {
-        const waitForResume = () => {
-          if (token !== state.runToken) {
-            resolve(false);
-            return;
-          }
-          if (!state.paused) {
-            onFrame(1);
-            resolve(true);
-            return;
-          }
-          requestAnimationFrame(waitForResume);
-        };
-        requestAnimationFrame(waitForResume);
-      });
-    }
-    onFrame(1);
-    const now = performance.now();
-    if (now - state.lastFastForwardYieldAt < FAST_FORWARD_YIELD_MS) {
-      return Promise.resolve(true);
-    }
-    state.lastFastForwardYieldAt = now;
-    return new Promise((resolve) => {
-      requestAnimationFrame(() => {
-        resolve(token === state.runToken);
-      });
-    });
-  }
-
+function waitForSimulationStep(token, isComplete) {
   return new Promise((resolve) => {
-    const safeDurationMs = Math.max(1, Number(durationMs) || 1);
-    let lastTime = null;
-    let progress = 0;
-
-    const step = (timestamp) => {
+    const step = () => {
       if (token !== state.runToken) {
         resolve(false);
         return;
       }
-
-      if (lastTime === null) {
-        lastTime = timestamp;
-      }
-
-      const delta = timestamp - lastTime;
-      lastTime = timestamp;
-
-      if (!state.paused) {
-        progress += (delta * state.speed) / safeDurationMs;
-        const t = Math.min(1, progress);
-        onFrame(t);
-      }
-
-      if (progress >= 1) {
+      if (isComplete()) {
         resolve(true);
         return;
       }
-
       requestAnimationFrame(step);
     };
-
     requestAnimationFrame(step);
   });
 }
 
-function simulationSecondsToMs(simulationSeconds, minMs = 120, maxMs = 2600) {
-  const seconds = Math.max(0, Number(simulationSeconds) || 0);
-  const raw = seconds * 45;
-  return Math.min(maxMs, Math.max(minMs, raw));
+function idleBoostForGap(gapSeconds, explicitBoost = null) {
+  if (explicitBoost !== null && explicitBoost !== undefined) {
+    return Math.max(1, Number(explicitBoost) || 1);
+  }
+  const gap = Math.max(0, Number(gapSeconds) || 0);
+  if (gap >= 4 * 3600) {
+    return 72;
+  }
+  if (gap >= 3600) {
+    return 36;
+  }
+  if (gap >= 300) {
+    return 12;
+  }
+  if (gap >= 60) {
+    return 6;
+  }
+  return 1;
 }
 
-function applyClockRange(clockRange, t) {
-  if (!clockRange) {
-    return;
-  }
-  const start = Number(clockRange.start);
-  const end = Number(clockRange.end);
-  if (!Number.isFinite(start) || !Number.isFinite(end)) {
-    return;
-  }
-  setPhaseClock(start + (end - start) * t);
-}
-
-async function advancePhaseClockTo(targetSeconds, token, minMs = 80) {
+async function advancePhaseClockTo(targetSeconds, token, options = {}) {
   const start = state.phaseClockSeconds;
   const target = Math.max(start, Number(targetSeconds) || start);
-  const delta = target - start;
-  if (delta <= 0) {
+  if (target <= start) {
     setPhaseClock(target);
-    return;
+    return true;
   }
+  const previousBoost = state.clockBoost;
+  state.clockRunning = true;
+  state.clockBoost = idleBoostForGap(target - start, options.boost);
+  try {
+    const completed = await waitForSimulationStep(token, () => state.phaseClockSeconds >= target);
+    if (completed && token === state.runToken) {
+      setPhaseClock(target);
+    }
+    return completed;
+  } finally {
+    state.clockBoost = previousBoost;
+  }
+}
 
-  await tween(
-    Math.max(minMs, simulationSecondsToMs(delta, minMs, 1400)),
-    (t) => {
-      setPhaseClock(start + delta * t);
-    },
-    token,
-  );
+async function animateBySimulationTime(startSeconds, endSeconds, token, onFrame) {
+  const start = Number.isFinite(startSeconds) ? Number(startSeconds) : state.phaseClockSeconds;
+  const end = Number.isFinite(endSeconds) ? Math.max(start, Number(endSeconds)) : start;
+  const duration = Math.max(0.0001, end - start);
+  if (state.phaseClockSeconds < start) {
+    const reached = await advancePhaseClockTo(start, token);
+    if (!reached) {
+      return false;
+    }
+  }
+  onFrame(Math.min(1, Math.max(0, (state.phaseClockSeconds - start) / duration)));
+  const completed = await waitForSimulationStep(token, () => {
+    const t = Math.min(1, Math.max(0, (state.phaseClockSeconds - start) / duration));
+    onFrame(t);
+    return state.phaseClockSeconds >= end;
+  });
+  if (completed && token === state.runToken) {
+    onFrame(1);
+    setPhaseClock(end);
+  }
+  return completed;
 }
 
 async function moveCraneHorizontal(targetX, targetZ, token, clockRange = null) {
   const startX = state.cranePose.x;
   const startZ = state.cranePose.z;
-
-  const cost = Math.abs(targetX - startX) / STEP.x + YARD_CONFIG.lengthCostWeight * (Math.abs(targetZ - startZ) / STEP.z);
-  const duration = 220 + cost * 120;
-
-  await tween(
-    duration,
-    (t) => {
-      state.cranePose.x = THREE.MathUtils.lerp(startX, targetX, t);
-      state.cranePose.z = THREE.MathUtils.lerp(startZ, targetZ, t);
-      applyClockRange(clockRange, t);
-    },
-    token,
+  const fallbackStart = state.phaseClockSeconds;
+  const fallbackDuration = Math.max(
+    0.25,
+    Math.abs(targetX - startX) / STEP.x + YARD_CONFIG.lengthCostWeight * (Math.abs(targetZ - startZ) / STEP.z),
   );
+  const start = clockRange ? clockRange.start : fallbackStart;
+  const end = clockRange ? clockRange.end : fallbackStart + fallbackDuration;
+  await animateBySimulationTime(start, end, token, (t) => {
+    state.cranePose.x = THREE.MathUtils.lerp(startX, targetX, t);
+    state.cranePose.z = THREE.MathUtils.lerp(startZ, targetZ, t);
+  });
 }
 
 async function moveHook(targetY, token, clockRange = null) {
   const startY = state.cranePose.hookY;
-  const duration = 180 + (Math.abs(targetY - startY) / STEP.y) * 130;
-
-  await tween(
-    duration,
-    (t) => {
-      state.cranePose.hookY = THREE.MathUtils.lerp(startY, targetY, t);
-      applyClockRange(clockRange, t);
-    },
-    token,
-  );
+  const fallbackStart = state.phaseClockSeconds;
+  const fallbackDuration = Math.max(0.15, Math.abs(targetY - startY) / STEP.y);
+  const start = clockRange ? clockRange.start : fallbackStart;
+  const end = clockRange ? clockRange.end : fallbackStart + fallbackDuration;
+  await animateBySimulationTime(start, end, token, (t) => {
+    state.cranePose.hookY = THREE.MathUtils.lerp(startY, targetY, t);
+  });
 }
 
 function syncStackMesh(containerId, x, z, y) {
@@ -1599,7 +1586,7 @@ async function executeMove(move, token) {
   const rawMoveEnd = Number.isFinite(move.tEnd) ? move.tEnd : rawMoveStart + Math.max(1, move.durationSeconds || move.weightedCost || 1);
   const moveStart = Math.min(NIGHT_DURATION_SECONDS, Math.max(0, rawMoveStart));
   const moveEnd = Math.min(NIGHT_DURATION_SECONDS, Math.max(moveStart, rawMoveEnd));
-  await advancePhaseClockTo(moveStart, token, 40);
+  await advancePhaseClockTo(moveStart, token);
   if (token !== state.runToken) {
     return;
   }
@@ -1684,7 +1671,7 @@ async function executeMove(move, token) {
   if (token !== state.runToken) {
     return;
   }
-  await advancePhaseClockTo(moveEnd, token, 60);
+  await advancePhaseClockTo(moveEnd, token);
 }
 
 function removeContainerVisual(containerId) {
@@ -1708,14 +1695,12 @@ function getTruckSlotWorldZ(slotIndex) {
 async function moveTruckTo(truck, targetX, targetZ, token, durationSeconds = 6) {
   const startX = truck.position.x;
   const startZ = truck.position.z;
-  await tween(
-    simulationSecondsToMs(durationSeconds, 110, 1300),
-    (t) => {
-      truck.position.x = THREE.MathUtils.lerp(startX, targetX, t);
-      truck.position.z = THREE.MathUtils.lerp(startZ, targetZ, t);
-    },
-    token,
-  );
+  const start = state.phaseClockSeconds;
+  const end = start + Math.max(0.05, Number(durationSeconds) || 0.05);
+  await animateBySimulationTime(start, end, token, (t) => {
+    truck.position.x = THREE.MathUtils.lerp(startX, targetX, t);
+    truck.position.z = THREE.MathUtils.lerp(startZ, targetZ, t);
+  });
 }
 
 async function executeDayJob(job, token) {
@@ -1726,7 +1711,7 @@ async function executeDayJob(job, token) {
   truck.visible = true;
   truck.position.set(world.trucks.passingLaneX, 0.02, world.trucks.entryZ);
 
-  await advancePhaseClockTo(job.arrivalTime, token, 60);
+  await advancePhaseClockTo(job.arrivalTime, token);
   if (token !== state.runToken) {
     return;
   }
@@ -1740,7 +1725,7 @@ async function executeDayJob(job, token) {
     return;
   }
 
-  await advancePhaseClockTo(job.loadStartTime, token, 50);
+  await advancePhaseClockTo(job.loadStartTime, token);
   if (token !== state.runToken) {
     return;
   }
@@ -1823,12 +1808,12 @@ async function executeDayJob(job, token) {
   if (token !== state.runToken) {
     return;
   }
-  await advancePhaseClockTo(loadEnd, token, 45);
+  await advancePhaseClockTo(loadEnd, token);
   if (token !== state.runToken) {
     return;
   }
 
-  await advancePhaseClockTo(job.departTime, token, 60);
+  await advancePhaseClockTo(job.departTime, token);
   if (token !== state.runToken) {
     return;
   }
@@ -1858,7 +1843,7 @@ async function runDayCycle(dayCycle, token) {
 
   if (!jobs.length) {
     refs.statusText.textContent = "No day-cycle jobs scheduled for this day window.";
-    await advancePhaseClockTo(dayDurationSeconds, token, 260);
+    await advancePhaseClockTo(dayDurationSeconds, token, { boost: 48 });
     return;
   }
 
@@ -1882,7 +1867,7 @@ async function runDayCycle(dayCycle, token) {
     return;
   }
 
-  await advancePhaseClockTo(dayDurationSeconds, token, 260);
+  await advancePhaseClockTo(dayDurationSeconds, token, { boost: 48 });
 }
 
 async function solveScenario() {
@@ -1898,6 +1883,8 @@ async function solveScenario() {
   const token = ++state.runToken;
   state.solving = true;
   state.paused = false;
+  state.clockRunning = true;
+  state.clockBoost = 1;
   state.moveCursor = 0;
   state.moveTotal = 0;
   state.weightedCost = 0;
@@ -1917,6 +1904,8 @@ async function solveScenario() {
     plan = await requestSolvePlan(cloneStacks(state.stacks), algorithmFormValues);
   } catch (error) {
     state.solving = false;
+    state.clockRunning = false;
+    state.clockBoost = 1;
     refs.pauseBtn.disabled = true;
     refs.pauseBtn.textContent = "Pause";
     refs.solveBtn.disabled = false;
@@ -1957,21 +1946,13 @@ async function solveScenario() {
     return;
   }
 
-  await advancePhaseClockTo(NIGHT_DURATION_SECONDS, token, 240);
+  await advancePhaseClockTo(NIGHT_DURATION_SECONDS, token, { boost: 72 });
   if (token !== state.runToken) {
     return;
   }
 
   setCyclePhase("phaseShift");
   refs.statusText.textContent = "Night cycle complete. Switching to day-cycle truck schedule...";
-  await tween(
-    700,
-    () => {},
-    token,
-  );
-  if (token !== state.runToken) {
-    return;
-  }
 
   await runDayCycle(plan.dayCycle, token);
   if (token !== state.runToken) {
@@ -1980,6 +1961,8 @@ async function solveScenario() {
 
   state.solving = false;
   state.paused = false;
+  state.clockRunning = false;
+  state.clockBoost = 1;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
   refs.solveBtn.disabled = true;

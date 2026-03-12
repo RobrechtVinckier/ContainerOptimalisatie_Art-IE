@@ -18,7 +18,7 @@ const DAY_CRANE_PHASES = Object.freeze({
 
 const DEFAULTS = Object.freeze({
   fixedStepSeconds: 0.25,
-  maxFixedStepsPerFrame: 240,
+  maxFixedStepsPerFrame: 600,
   entryProgressDistance: 2.8,
   approachBuffer: 3.1,
   nominalRoadSpeed: 5.8,
@@ -536,10 +536,14 @@ export function advanceDayRuntime(runtime, targetTime, hooks = {}) {
 
   const safeTarget = Math.max(runtime.lastSimTime, Number(targetTime) || 0);
   let cursor = runtime.lastSimTime;
+  const backlog = safeTarget - runtime.lastSimTime;
+  const dynamicStep = backlog <= runtime.road.fixedStepSeconds * runtime.road.maxFixedStepsPerFrame
+    ? runtime.road.fixedStepSeconds
+    : backlog / runtime.road.maxFixedStepsPerFrame;
   let steps = 0;
 
   while (cursor + 1e-6 < safeTarget && steps < runtime.road.maxFixedStepsPerFrame) {
-    const nextTime = Math.min(safeTarget, cursor + runtime.road.fixedStepSeconds);
+    const nextTime = Math.min(safeTarget, cursor + dynamicStep);
     const dt = nextTime - cursor;
     spawnReadyTrucks(runtime, nextTime, hooks);
     updateManeuvers(runtime, nextTime, hooks);

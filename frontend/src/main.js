@@ -41,6 +41,7 @@ const DAY_CLOCK_BASE_SECONDS = 6 * 3600;
 const DAY_DURATION_SECONDS = 16 * 3600;
 const MAX_RANDOM_CONTAINER_COUNT = YARD_CONFIG.width * YARD_CONFIG.length * YARD_CONFIG.height;
 const MAX_RANDOM_MOVABLE_CONTAINER_COUNT = Math.max(1, MAX_RANDOM_CONTAINER_COUNT - 1);
+const MAX_PLAYBACK_SPEED = 1000;
 const DEFAULT_RANDOM_GROUPS = 3;
 const FAST_FORWARD_SPEED_THRESHOLD = 70;
 const FAST_FORWARD_PROJECTION_THROTTLE_MS = 90;
@@ -86,7 +87,7 @@ app.innerHTML = `
       <button id="pause-btn" class="btn" disabled>Pause</button>
       <label class="speed-box" for="speed-slider">
         <span>Playback Speed</span>
-        <input id="speed-slider" type="range" min="1" max="100" step="1" value="1" />
+        <input id="speed-slider" type="range" min="1" max="${MAX_PLAYBACK_SPEED}" step="1" value="1" />
         <output id="speed-value">1x</output>
       </label>
       <label class="pass-box" for="passthrough-toggle">
@@ -497,7 +498,7 @@ refs.pauseBtn.addEventListener("click", () => {
 });
 
 refs.speedSlider.addEventListener("input", (event) => {
-  state.speed = Math.max(1, Math.round(Number(event.target.value) || 1));
+  state.speed = Math.min(MAX_PLAYBACK_SPEED, Math.max(1, Math.round(Number(event.target.value) || 1)));
   event.target.value = String(state.speed);
   refs.speedValue.textContent = `${state.speed}x`;
 });

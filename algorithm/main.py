@@ -40,7 +40,8 @@ def make_random_instance(X: int, Y: int, H: int, groups: int, per_group: int, se
 
     # build state and randomize crane start (optional; keep deterministic)
     state = State.build_from_yard(X=X, Y=Y, H=H, yard=yard, group=group)
-    state.crane_pos = (0, 0)
+    state.crane_pos = (0, Y // 2)
+    state.prev_crane_pos = None
     state.time_used = 0.0
     return state
 

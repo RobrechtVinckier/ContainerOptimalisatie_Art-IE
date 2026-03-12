@@ -79,6 +79,7 @@ class State:
     pos: List[XY]
 
     crane_pos: XY = (0, 0)
+    prev_crane_pos: Optional[XY] = None
     time_used: float = 0.0
 
     # counts by group per coordinate axis
@@ -536,6 +537,7 @@ class State:
         # Compute move time and update time/crane
         dt = self.move_time(src, dst)
         self.time_used += dt
+        self.prev_crane_pos = self.crane_pos
         self.crane_pos = dst
 
         # Pop/push
@@ -584,6 +586,7 @@ class State:
             group=list(self.group),
             pos=list(self.pos),
             crane_pos=self.crane_pos,
+            prev_crane_pos=self.prev_crane_pos,
             time_used=self.time_used,
             count_x=[list(row) for row in self.count_x],
             count_y=[list(row) for row in self.count_y],

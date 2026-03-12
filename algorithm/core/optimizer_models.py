@@ -57,6 +57,8 @@ class OptimizerConfig:
     energy_x_cost: float = 14.0
     energy_y_cost: float = 1.0
     energy_z_cost: float = 1.1
+    expensive_axis_deadhead_weight: float = 0.25
+    expensive_axis_reversal_weight: float = 0.6
 
     # candidate generation controls
     top_groups: int = 5

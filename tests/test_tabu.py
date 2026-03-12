@@ -244,6 +244,41 @@ class TestTabuBehavior(unittest.TestCase):
         self.assertGreater(x_move.delta_energy, y_move.delta_energy)
         self.assertGreater(x_move.score, y_move.score)
 
+    def test_expensive_axis_reversal_penalty_prefers_continuing_local_sweep(self) -> None:
+        X, Y, H = 5, 1, 1
+        yard: List[List[List[int]]] = [[[] for _ in range(Y)] for _ in range(X)]
+        yard[2][0] = [0]
+        st = State.build_from_yard(X=X, Y=Y, H=H, yard=yard, group=[0])
+        st.prev_crane_pos = (1, 0)
+        st.crane_pos = (2, 0)
+        st.time_used = 0.0
+
+        cfg = OptimizerConfig(
+            seed=1,
+            lam=0.0,
+            energy_weight=1.0,
+            energy_x_cost=10.0,
+            energy_y_cost=1.0,
+            energy_z_cost=1.0,
+            top_groups=1,
+            src_limit=1,
+            dst_limit_per_src=10,
+            x_radius=3,
+            y_radius=0,
+            y_aware=True,
+            selection_mode="best",
+        )
+
+        cands = generate_candidate_moves(st, cfg)
+        by_dst = {(c.dst[0], c.dst[1]): c for c in cands}
+        self.assertIn((1, 0), by_dst)
+        self.assertIn((3, 0), by_dst)
+
+        continue_sweep = by_dst[(3, 0)]
+        reverse_sweep = by_dst[(1, 0)]
+        self.assertLess(continue_sweep.operational_cost, reverse_sweep.operational_cost)
+        self.assertLess(continue_sweep.score, reverse_sweep.score)
+
     def test_tie_break_prefers_lower_operational_cost_within_quality_eps(self) -> None:
         st = self.make_ping_pong_state()
         cfg = OptimizerConfig(

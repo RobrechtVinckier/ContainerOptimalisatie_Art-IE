@@ -59,6 +59,21 @@ def _axis_delta(a: XY, b: XY, axis: int) -> int:
     return abs(a[axis] - b[axis])
 
 
+def _axis_direction(a: XY, b: XY, axis: int) -> int:
+    delta = b[axis] - a[axis]
+    if delta > 0:
+        return 1
+    if delta < 0:
+        return -1
+    return 0
+
+
+def _last_expensive_axis_direction(state: State, axis: int) -> int:
+    if state.prev_crane_pos is None:
+        return 0
+    return _axis_direction(state.prev_crane_pos, state.crane_pos, axis)
+
+
 def _destination_group_preference(state: State, group_index: int, dst: XY) -> int:
     """
     Hard preference for destination stack type:
@@ -91,6 +106,7 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
         return []
 
     expensive_axis = _dominant_expensive_axis(cfg)
+    last_axis_direction = _last_expensive_axis_direction(state, expensive_axis)
 
     group_pressure = [0.0 for _ in range(g_count)]
     for x in range(state.X):
@@ -138,11 +154,18 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
                 + cfg.stack_impurity_weight * impurity
                 + cfg.buried_foreign_weight * buried
             )
+            src_axis_direction = _axis_direction(state.crane_pos, (x, y), expensive_axis)
+            reverses_recent_axis = 1 if (
+                last_axis_direction != 0
+                and src_axis_direction != 0
+                and src_axis_direction != last_axis_direction
+            ) else 0
             crane_axis_delta = _axis_delta(state.crane_pos, (x, y), expensive_axis)
             if cfg.max_expensive_axis_src_delta > 0 and crane_axis_delta > cfg.max_expensive_axis_src_delta:
                 continue
             crane_reposition = travel_time(state.crane_pos, (x, y))
             priority = (
+                reverses_recent_axis,
                 crane_axis_delta,
                 crane_reposition,
                 -structural_pressure,
@@ -292,9 +315,34 @@ def generate_candidate_moves(state: State, cfg: OptimizerConfig, iteration: Opti
             )
             dquality = cfg.lam * dcl + dstack + cfg.group_fragmentation_weight * dfrag
             de = _move_energy_cost(state, src, dst, cfg)
-            expensive_axis_travel = _axis_delta(state.crane_pos, src, expensive_axis) + _axis_delta(src, dst, expensive_axis)
+            travel_to_src_axis = _axis_delta(state.crane_pos, src, expensive_axis)
+            loaded_axis_travel = _axis_delta(src, dst, expensive_axis)
+            expensive_axis_travel = travel_to_src_axis + loaded_axis_travel
             expensive_axis_penalty = max(cfg.energy_x_cost, cfg.energy_y_cost) * float(expensive_axis_travel ** 2) * 0.45
-            operational = cfg.operational_weight * (dt + cfg.energy_weight * de + expensive_axis_penalty)
+            deadhead_axis_penalty = (
+                max(cfg.energy_x_cost, cfg.energy_y_cost)
+                * float(travel_to_src_axis ** 2)
+                * cfg.expensive_axis_deadhead_weight
+            )
+            candidate_axis_direction = _axis_direction(state.crane_pos, dst, expensive_axis)
+            reversal_axis_penalty = 0.0
+            if (
+                last_axis_direction != 0
+                and candidate_axis_direction != 0
+                and candidate_axis_direction != last_axis_direction
+            ):
+                reversal_axis_penalty = (
+                    max(cfg.energy_x_cost, cfg.energy_y_cost)
+                    * float(max(1, expensive_axis_travel) ** 2)
+                    * cfg.expensive_axis_reversal_weight
+                )
+            operational = cfg.operational_weight * (
+                dt
+                + cfg.energy_weight * de
+                + expensive_axis_penalty
+                + deadhead_axis_penalty
+                + reversal_axis_penalty
+            )
             score = dquality + operational
             candidates.append(
                 Candidate(

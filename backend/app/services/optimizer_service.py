@@ -38,7 +38,9 @@ def state_from_stacks(stacks: List[List[List[dict]]]) -> Tuple[State, Dict[int, 
                 metadata[cid] = {"id": container["id"], "color": color_name}
 
     state = State.build_from_yard(X=YARD_LENGTH, Y=YARD_WIDTH, H=YARD_HEIGHT, yard=yard, group=group)
-    state.crane_pos = (0, 0)
+    # Match the visible frontend crane start: truck-facing end, centered across width.
+    state.crane_pos = (0, YARD_WIDTH // 2)
+    state.prev_crane_pos = None
     state.time_used = 0.0
     return state, metadata
 

@@ -4,7 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { getAlgorithmSettings, requestRandomConfiguration, requestSolvePlan, updateAlgorithmSettings } from "./api/backendClient.js";
 import { YARD_CONFIG, cloneStacks, placementScoreWeightsFromAlgorithmSettings, resolveColorHex, summarizeStacks } from "./config/yardModel.js";
 import { buildCrane, buildGround } from "./scene/layout.js";
-import { buildTrucks, clearTruckCargo, createTruckModel, setTruckCargo } from "./scene/trucks.js";
+import { buildTrucks, clearTruckCargo, createTruckModel, formatTruckDisplayId, setTruckCargo } from "./scene/trucks.js";
 
 const SCALE = 0.72;
 const CONTAINER_DIM = Object.freeze({
@@ -637,6 +637,7 @@ function getOrCreateTruck(truckId, companyColor) {
     containerColor: null,
     metrics: SCENE_METRICS,
     colorToThree,
+    truckId,
   });
   truck.visible = false;
   world.trucks.map.set(truckId, truck);
@@ -1693,14 +1694,23 @@ function getTruckSlotWorldZ(slotIndex) {
 }
 
 async function moveTruckTo(truck, targetX, targetZ, token, durationSeconds = 6) {
+  const startHeading = truck.rotation.y;
   const startX = truck.position.x;
   const startZ = truck.position.z;
   const start = state.phaseClockSeconds;
   const end = start + Math.max(0.05, Number(durationSeconds) || 0.05);
   await animateBySimulationTime(start, end, token, (t) => {
-    truck.position.x = THREE.MathUtils.lerp(startX, targetX, t);
-    truck.position.z = THREE.MathUtils.lerp(startZ, targetZ, t);
+    const eased = t < 0.5
+      ? 4 * t * t * t
+      : 1 - ((-2 * t + 2) ** 3) / 2;
+    truck.position.x = THREE.MathUtils.lerp(startX, targetX, eased);
+    truck.position.z = THREE.MathUtils.lerp(startZ, targetZ, eased);
+    const xDelta = targetX - startX;
+    const zDelta = targetZ - startZ;
+    const targetHeading = Math.abs(xDelta) > 0.12 ? -Math.sign(xDelta) * 0.24 : 0;
+    truck.rotation.y = THREE.MathUtils.lerp(startHeading, targetHeading, eased);
   });
+  truck.rotation.y = 0;
 }
 
 async function executeDayJob(job, token) {
@@ -1709,6 +1719,7 @@ async function executeDayJob(job, token) {
 
   clearTruckCargo(truck);
   truck.visible = true;
+  truck.rotation.y = 0;
   truck.position.set(world.trucks.passingLaneX, 0.02, world.trucks.entryZ);
 
   await advancePhaseClockTo(job.arrivalTime, token);
@@ -1716,11 +1727,16 @@ async function executeDayJob(job, token) {
     return;
   }
 
-  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ, token, 7);
+  refs.statusText.textContent = `${formatTruckDisplayId(job.truckId)} arriving for ${job.company}.`;
+  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ - STEP.z * 0.35, token, 7.8);
   if (token !== state.runToken) {
     return;
   }
-  await moveTruckTo(truck, world.trucks.parkingLaneX, slotZ, token, 2.5);
+  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ, token, 1.5);
+  if (token !== state.runToken) {
+    return;
+  }
+  await moveTruckTo(truck, world.trucks.parkingLaneX, slotZ, token, 2.6);
   if (token !== state.runToken) {
     return;
   }
@@ -1818,11 +1834,16 @@ async function executeDayJob(job, token) {
     return;
   }
 
+  refs.statusText.textContent = `${formatTruckDisplayId(job.truckId)} leaving ${job.company}.`;
   await moveTruckTo(truck, world.trucks.passingLaneX, slotZ, token, 1.8);
   if (token !== state.runToken) {
     return;
   }
-  await moveTruckTo(truck, world.trucks.passingLaneX, world.trucks.exitZ, token, 6.4);
+  await moveTruckTo(truck, world.trucks.passingLaneX, slotZ + STEP.z * 0.45, token, 1.1);
+  if (token !== state.runToken) {
+    return;
+  }
+  await moveTruckTo(truck, world.trucks.passingLaneX, world.trucks.exitZ, token, 6.8);
 
   clearTruckCargo(truck);
   truck.visible = false;

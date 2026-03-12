@@ -1,5 +1,13 @@
 import * as THREE from "three";
 
+export function formatTruckDisplayId(truckId) {
+  const digits = String(truckId || "").match(/\d+/);
+  if (digits) {
+    return `Truck #${Number(digits[0])}`;
+  }
+  return String(truckId || "Truck");
+}
+
 export function buildTrucks(group, metrics) {
   const { laneMinX, laneWidthWorld, yardMinZ, containerDim, yardLengthWorld, daySlotCount } = metrics;
   const layer = new THREE.Group();
@@ -14,6 +22,36 @@ export function buildTrucks(group, metrics) {
     exitZ: yardMinZ + yardLengthWorld + containerDim.z + 12,
     slotZ: Array.from({ length: daySlotCount }, (_, slot) => yardMinZ + ((slot + 0.5) * yardLengthWorld) / daySlotCount),
   };
+}
+
+function createTruckIdBadge(truckId) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 768;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const label = formatTruckDisplayId(truckId).toUpperCase();
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(255, 248, 232, 0.92)";
+  ctx.fillRect(12, 28, canvas.width - 24, canvas.height - 56);
+  ctx.strokeStyle = "rgba(30, 42, 56, 0.28)";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(12, 28, canvas.width - 24, canvas.height - 56);
+  ctx.fillStyle = "#111111";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = 'bold 96px Impact, "Arial Black", sans-serif';
+  ctx.fillText(label, canvas.width / 2, canvas.height / 2 + 8);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.anisotropy = 8;
+  const material = new THREE.MeshStandardMaterial({
+    map: texture,
+    transparent: true,
+    roughness: 0.52,
+    metalness: 0.05,
+  });
+  return new THREE.Mesh(new THREE.PlaneGeometry(2.7, 0.9), material);
 }
 
 function createHaulContainer(colorName, metrics, colorToThree) {
@@ -69,7 +107,7 @@ export function setTruckCargo(truck, colorName, { metrics, colorToThree }) {
   truck.userData.cargo = cargo;
 }
 
-export function createTruckModel({ cabColor, containerColor = null, metrics, colorToThree }) {
+export function createTruckModel({ cabColor, containerColor = null, metrics, colorToThree, truckId = "" }) {
   const { laneWidthWorld, containerDim, containerVisualHeight } = metrics;
   const group = new THREE.Group();
   const truckWidth = Math.min(laneWidthWorld * 0.82, containerDim.x * 0.92);
@@ -124,7 +162,8 @@ export function createTruckModel({ cabColor, containerColor = null, metrics, col
     new THREE.BoxGeometry(truckWidth * 0.62, 0.42, 0.06),
     new THREE.MeshStandardMaterial({ color: "#d6ecff", roughness: 0.2, metalness: 0.3 }),
   );
-  windshield.position.set(0, wheelRadius + 1.1, cabFrontZ - 0.1);
+  windshield.position.set(0, wheelRadius + 1.07, cabFrontZ - 0.44);
+  windshield.rotation.x = -0.34;
   windshield.castShadow = true;
   group.add(windshield);
 
@@ -157,6 +196,19 @@ export function createTruckModel({ cabColor, containerColor = null, metrics, col
     }
   }
 
+  const badgeOffsetX = truckWidth * 0.51;
+  const badgeY = trailerDeckTopY + 0.58;
+  const badgeZ = -0.1;
+  const leftBadge = createTruckIdBadge(truckId);
+  leftBadge.position.set(-badgeOffsetX, badgeY, badgeZ);
+  leftBadge.rotation.y = Math.PI / 2;
+  group.add(leftBadge);
+
+  const rightBadge = createTruckIdBadge(truckId);
+  rightBadge.position.set(badgeOffsetX, badgeY, badgeZ);
+  rightBadge.rotation.y = -Math.PI / 2;
+  group.add(rightBadge);
+
   group.userData.cargoAnchor = cargoAnchor;
   group.userData.cargoSize = {
     width: truckWidth * 0.97,
@@ -164,6 +216,7 @@ export function createTruckModel({ cabColor, containerColor = null, metrics, col
     length: containerLength,
   };
   group.userData.cargo = null;
+  group.userData.displayId = formatTruckDisplayId(truckId);
 
   if (containerColor) {
     setTruckCargo(group, containerColor, { metrics, colorToThree });

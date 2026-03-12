@@ -50,6 +50,7 @@ function createTruckIdBadge(truckId) {
     transparent: true,
     roughness: 0.52,
     metalness: 0.05,
+    side: THREE.DoubleSide,
   });
   return new THREE.Mesh(new THREE.PlaneGeometry(2.7, 0.9), material);
 }
@@ -205,15 +206,10 @@ export function createTruckModel({ cabColor, containerColor = null, metrics, col
   const badgeOffsetX = truckWidth * 0.51;
   const badgeY = trailerDeckTopY + 0.58;
   const badgeZ = -0.1;
-  const leftBadge = createTruckIdBadge(truckId);
-  leftBadge.position.set(-badgeOffsetX, badgeY, badgeZ);
-  leftBadge.rotation.y = Math.PI / 2;
-  group.add(leftBadge);
-
-  const rightBadge = createTruckIdBadge(truckId);
-  rightBadge.position.set(badgeOffsetX, badgeY, badgeZ);
-  rightBadge.rotation.y = -Math.PI / 2;
-  group.add(rightBadge);
+  const liftSideBadge = createTruckIdBadge(truckId);
+  liftSideBadge.position.set(-badgeOffsetX, badgeY, badgeZ);
+  liftSideBadge.rotation.y = -Math.PI / 2;
+  group.add(liftSideBadge);
 
   group.userData.cargoAnchor = cargoAnchor;
   group.userData.cargoSize = {

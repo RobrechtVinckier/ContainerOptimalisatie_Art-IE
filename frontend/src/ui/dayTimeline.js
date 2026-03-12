@@ -36,8 +36,149 @@ function assignJobLanes(jobs) {
   });
 }
 
+function groupJobsByCompany(jobs) {
+  const grouped = new Map();
+  for (const job of sortJobsBySchedule(jobs)) {
+    const key = `${job.company}|${job.companyColor || job.containerColor || ""}`;
+    let entry = grouped.get(key);
+    if (!entry) {
+      entry = {
+        key,
+        company: job.company,
+        color: job.companyColor || job.containerColor || "#5c7fa6",
+        jobs: [],
+        firstArrival: job.arrivalTime,
+      };
+      grouped.set(key, entry);
+    }
+    entry.jobs.push(job);
+    entry.firstArrival = Math.min(entry.firstArrival, job.arrivalTime);
+  }
+  return [...grouped.values()].sort((left, right) => {
+    if (left.firstArrival !== right.firstArrival) {
+      return left.firstArrival - right.firstArrival;
+    }
+    return left.company.localeCompare(right.company);
+  });
+}
+
+function compactTruckLabel(label) {
+  return String(label).replace("Truck #", "#").replace("Truck ", "");
+}
+
+function appendAxis(host, dayDurationSeconds, dayStartSeconds) {
+  const axis = document.createElement("div");
+  axis.className = "timeline-axis";
+
+  const gutter = document.createElement("div");
+  gutter.className = "timeline-axis-gutter";
+  gutter.textContent = "Company";
+  axis.appendChild(gutter);
+
+  const track = document.createElement("div");
+  track.className = "timeline-axis-track";
+  const tickCount = 9;
+  for (let index = 0; index < tickCount; index += 1) {
+    const tickSeconds = (dayDurationSeconds / (tickCount - 1)) * index;
+    const tick = document.createElement("span");
+    tick.className = "timeline-axis-tick";
+    tick.style.left = `${clampPercent((tickSeconds / dayDurationSeconds) * 100)}%`;
+    tick.textContent = formatTime(tickSeconds, dayStartSeconds);
+    track.appendChild(tick);
+  }
+  axis.appendChild(track);
+  host.appendChild(axis);
+}
+
+function appendCurrentTimeLine(track, currentTimeSeconds, dayDurationSeconds) {
+  if (!Number.isFinite(currentTimeSeconds)) {
+    return;
+  }
+  const line = document.createElement("div");
+  line.className = "timeline-current-line";
+  line.style.left = `${clampPercent((currentTimeSeconds / dayDurationSeconds) * 100)}%`;
+  track.appendChild(line);
+}
+
+function renderGroupRow(group, host, options) {
+  const {
+    activeJobIndex,
+    currentTimeSeconds,
+    dayDurationSeconds,
+    dayStartSeconds,
+    formatTruckLabel,
+  } = options;
+  const row = document.createElement("section");
+  row.className = "timeline-row";
+
+  const label = document.createElement("div");
+  label.className = "timeline-row-label";
+  const swatch = document.createElement("span");
+  swatch.className = "timeline-row-swatch";
+  swatch.style.background = group.color;
+  label.appendChild(swatch);
+
+  const meta = document.createElement("div");
+  meta.className = "timeline-row-meta";
+  const company = document.createElement("strong");
+  company.textContent = group.company;
+  meta.appendChild(company);
+
+  const count = document.createElement("span");
+  count.textContent = `${group.jobs.length} truck${group.jobs.length === 1 ? "" : "s"}`;
+  meta.appendChild(count);
+  label.appendChild(meta);
+  row.appendChild(label);
+
+  const track = document.createElement("div");
+  track.className = "timeline-row-track";
+  const assignedJobs = assignJobLanes(group.jobs);
+  const laneCount = Math.max(1, ...assignedJobs.map((item) => item.laneIndex + 1));
+  track.style.setProperty("--timeline-track-lanes", String(laneCount));
+  appendCurrentTimeLine(track, currentTimeSeconds, dayDurationSeconds);
+
+  for (const { job, laneIndex } of assignedJobs) {
+    const startPercent = clampPercent((job.arrivalTime / dayDurationSeconds) * 100);
+    const widthPercent = Math.max(0.3, clampPercent(((job.departTime - job.arrivalTime) / dayDurationSeconds) * 100));
+    const block = document.createElement("article");
+    block.className = "timeline-job";
+    if (job.jobIndex - 1 === activeJobIndex) {
+      block.classList.add("is-active");
+    }
+    if (widthPercent <= 1.2) {
+      block.classList.add("is-micro");
+    } else if (widthPercent <= 2.6) {
+      block.classList.add("is-compact");
+    }
+    block.style.left = `${startPercent}%`;
+    block.style.width = `${widthPercent}%`;
+    block.style.top = `calc(${laneIndex} * (var(--timeline-track-row-height) + 6px) + 4px)`;
+    block.style.background = group.color;
+    block.title = `${formatTruckLabel(job.truckId)} | ${job.company} | ${formatTime(job.arrivalTime, dayStartSeconds)}-${formatTime(job.departTime, dayStartSeconds)}`;
+
+    const truck = document.createElement("strong");
+    const fullLabel = formatTruckLabel(job.truckId);
+    truck.textContent = widthPercent <= 2.6 ? compactTruckLabel(fullLabel) : fullLabel;
+    block.appendChild(truck);
+
+    if (widthPercent > 1.2) {
+      const jobMeta = document.createElement("span");
+      jobMeta.textContent = widthPercent <= 3.2
+        ? formatTime(job.arrivalTime, dayStartSeconds)
+        : `${formatTime(job.arrivalTime, dayStartSeconds)} • ${job.company}`;
+      block.appendChild(jobMeta);
+    }
+
+    track.appendChild(block);
+  }
+
+  row.appendChild(track);
+  host.appendChild(row);
+}
+
 export function renderDayTimeline(host, dayCycle, options = {}) {
   const activeJobIndex = Number.isFinite(options.activeJobIndex) ? Number(options.activeJobIndex) : -1;
+  const currentTimeSeconds = Number.isFinite(options.currentTimeSeconds) ? Number(options.currentTimeSeconds) : null;
   const formatTruckLabel = typeof options.formatTruckLabel === "function"
     ? options.formatTruckLabel
     : (truckId) => String(truckId);
@@ -59,61 +200,21 @@ export function renderDayTimeline(host, dayCycle, options = {}) {
 
   const timeline = document.createElement("div");
   timeline.className = "timeline-chart";
+  appendAxis(timeline, dayDurationSeconds, dayStartSeconds);
 
-  const axis = document.createElement("div");
-  axis.className = "timeline-axis";
-  const tickCount = 5;
-  for (let index = 0; index < tickCount; index += 1) {
-    const tickSeconds = (dayDurationSeconds / (tickCount - 1)) * index;
-    const tick = document.createElement("span");
-    tick.style.left = `${clampPercent((tickSeconds / dayDurationSeconds) * 100)}%`;
-    tick.textContent = formatTime(tickSeconds, dayStartSeconds);
-    axis.appendChild(tick);
-  }
-  timeline.appendChild(axis);
-
-  const body = document.createElement("div");
-  body.className = "timeline-body";
-  const assignedJobs = assignJobLanes(jobs);
-  const laneCount = Math.max(...assignedJobs.map((item) => item.laneIndex)) + 1;
-  body.style.setProperty("--timeline-lanes", String(laneCount));
-
-  for (const { job, laneIndex } of assignedJobs) {
-    const startPercent = clampPercent((job.arrivalTime / dayDurationSeconds) * 100);
-    const widthPercent = Math.max(0.55, clampPercent(((job.departTime - job.arrivalTime) / dayDurationSeconds) * 100));
-    const visualColor = job.companyColor || job.containerColor || "#5c7fa6";
-    const compactTruckLabel = formatTruckLabel(job.truckId).replace("Truck #", "#");
-    const block = document.createElement("article");
-    block.className = "timeline-block";
-    if (job.jobIndex - 1 === activeJobIndex) {
-      block.classList.add("is-active");
-    }
-    if (widthPercent <= 2.1) {
-      block.classList.add("is-micro");
-    } else if (widthPercent <= 4.2) {
-      block.classList.add("is-compact");
-    }
-    block.style.left = `${startPercent}%`;
-    block.style.width = `${widthPercent}%`;
-    block.style.top = `calc(${laneIndex} * (var(--timeline-row-height) + 8px))`;
-    block.style.background = visualColor;
-    block.title = `${formatTruckLabel(job.truckId)} | ${job.company} | ${formatTime(job.arrivalTime, dayStartSeconds)}-${formatTime(job.departTime, dayStartSeconds)}`;
-
-    const truck = document.createElement("strong");
-    truck.textContent = widthPercent <= 2.1 ? compactTruckLabel : formatTruckLabel(job.truckId);
-    block.appendChild(truck);
-
-    if (widthPercent > 2.1) {
-      const meta = document.createElement("span");
-      meta.textContent = widthPercent <= 4.2
-        ? formatTime(job.arrivalTime, dayStartSeconds)
-        : `${job.company} • ${formatTime(job.arrivalTime, dayStartSeconds)}`;
-      block.appendChild(meta);
-    }
-
-    body.appendChild(block);
+  const groups = groupJobsByCompany(jobs);
+  const rows = document.createElement("div");
+  rows.className = "timeline-rows";
+  for (const group of groups) {
+    renderGroupRow(group, rows, {
+      activeJobIndex,
+      currentTimeSeconds,
+      dayDurationSeconds,
+      dayStartSeconds,
+      formatTruckLabel,
+    });
   }
 
-  timeline.appendChild(body);
+  timeline.appendChild(rows);
   host.appendChild(timeline);
 }

@@ -415,6 +415,9 @@ function clearRuntimeStats() {
 function updateDayTimeline() {
   renderDayTimeline(refs.dayTimeline, state.dayCyclePlan, {
     activeJobIndex: state.activeDayJobIndex,
+    currentTimeSeconds: state.cyclePhase === "dayRunning" || state.cyclePhase === "completed"
+      ? state.phaseClockSeconds
+      : null,
     formatTruckLabel: formatTruckDisplayId,
   });
 }

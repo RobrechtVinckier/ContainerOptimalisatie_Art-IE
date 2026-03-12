@@ -78,10 +78,12 @@ export function buildGround(group, metrics) {
     shaft.position.set(passingLaneX, 0.035, z);
     group.add(shaft);
 
-    const head = new THREE.Mesh(new THREE.ConeGeometry(laneWidthWorld * 0.16, 0.86, 3), stripeMat);
-    head.rotation.x = -Math.PI / 2;
-    head.position.set(passingLaneX, 0.035, z + 1.45);
-    group.add(head);
+    for (const direction of [-1, 1]) {
+      const chevron = new THREE.Mesh(new THREE.BoxGeometry(laneWidthWorld * 0.05, 0.03, 0.9), stripeMat);
+      chevron.rotation.y = direction * 0.72;
+      chevron.position.set(passingLaneX + direction * laneWidthWorld * 0.045, 0.034, z + 1.28);
+      group.add(chevron);
+    }
   }
 
   const slotMarkMat = new THREE.MeshStandardMaterial({ color: "#fff2c4", roughness: 0.65 });

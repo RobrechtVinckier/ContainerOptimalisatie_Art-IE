@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { getAlgorithmSettings, requestRandomConfiguration, requestSolvePlan, updateAlgorithmSettings } from "./api/backendClient.js";
 import { YARD_CONFIG, cloneStacks, placementScoreWeightsFromAlgorithmSettings, resolveColorHex, summarizeStacks } from "./config/yardModel.js";
 import { buildCrane, buildGround } from "./scene/layout.js";
+import { createLighting, updateLighting } from "./scene/lighting.js";
 import { buildTrucks, clearTruckCargo, createTruckModel, formatTruckDisplayId, setTruckCargo } from "./scene/trucks.js";
 import { renderDayTimeline } from "./ui/dayTimeline.js";
 
@@ -580,24 +581,7 @@ function initWorld(host) {
 
   host.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight("#ffffff", 0.92);
-  scene.add(ambient);
-
-  const sunLight = new THREE.DirectionalLight("#fff4dc", 1.25);
-  sunLight.position.set(52, 64, 34);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
-  sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far = 220;
-  sunLight.shadow.camera.left = -65;
-  sunLight.shadow.camera.right = 65;
-  sunLight.shadow.camera.top = 65;
-  sunLight.shadow.camera.bottom = -65;
-  scene.add(sunLight);
-
-  const fillLight = new THREE.DirectionalLight("#b8d8ff", 0.62);
-  fillLight.position.set(-30, 26, -22);
-  scene.add(fillLight);
+  const lighting = createLighting(scene);
 
   const environmentGroup = new THREE.Group();
   const containerRoot = new THREE.Group();
@@ -638,6 +622,7 @@ function initWorld(host) {
     containerRoot,
     containerVisuals,
     crane,
+    lighting,
     trucks,
     clock,
     onResize,
@@ -828,6 +813,7 @@ function applyContainerSelectionStyles() {
 
   for (const [containerId, visual] of world.containerVisuals.entries()) {
     const selected = state.selectedContainerIds.has(containerId);
+    const activeCarry = state.carryingId === containerId;
     const faded = hasSelection && state.passthrough && !selected;
     const targetOpacity = faded ? 0.16 : 1;
 
@@ -836,13 +822,14 @@ function applyContainerSelectionStyles() {
       material.opacity = targetOpacity;
       material.depthWrite = targetOpacity >= 1;
       if (material.emissive) {
-        material.emissive.set(selected ? "#1e67d3" : "#000000");
-        material.emissiveIntensity = selected ? 0.22 : 0;
+        material.emissive.set(activeCarry ? "#ffb01f" : selected ? "#1e67d3" : "#000000");
+        material.emissiveIntensity = activeCarry ? 0.34 : selected ? 0.22 : 0;
       }
     }
 
     if (visual.edge) {
-      visual.edge.visible = selected;
+      visual.edge.visible = selected || activeCarry;
+      visual.edge.material.color.set(activeCarry ? "#ffb01f" : "#00abff");
     }
   }
 }
@@ -891,6 +878,10 @@ function startRenderLoop() {
   const render = () => {
     const delta = world.clock.getDelta();
     updateSimulationClock(delta);
+    updateLighting(world.lighting, {
+      phaseClockBase: state.phaseClockBase,
+      phaseClockSeconds: state.phaseClockSeconds,
+    });
     world.controls.update();
     animateTrucks(delta);
     applyCranePose();

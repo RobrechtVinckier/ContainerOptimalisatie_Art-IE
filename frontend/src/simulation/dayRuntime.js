@@ -51,11 +51,9 @@ const PHASES_USING_LANE = new Set([
 ]);
 
 const PHASES_OCCUPYING_BAY = new Set([
-  DAY_TRUCK_PHASES.parkingBay,
   DAY_TRUCK_PHASES.waiting,
   DAY_TRUCK_PHASES.loading,
   DAY_TRUCK_PHASES.loaded,
-  DAY_TRUCK_PHASES.mergingOut,
 ]);
 
 function clamp01(value) {
@@ -241,8 +239,6 @@ function shouldDispatchActor(runtime, actor, time) {
     DAY_TRUCK_PHASES.waiting,
     DAY_TRUCK_PHASES.loading,
     DAY_TRUCK_PHASES.loaded,
-    DAY_TRUCK_PHASES.mergingOut,
-    DAY_TRUCK_PHASES.departing,
   ]);
   const highActivityVisible = visibleActors.some((visibleActor) => highActivityPhases.has(visibleActor.phase));
   return highActivityVisible || visibleActors.length < runtime.road.preferredVisibleTrucks;
@@ -650,12 +646,9 @@ export function advanceDayRuntime(runtime, targetTime, hooks = {}) {
 
   while (cursor + 1e-6 < cappedTarget && steps < runtime.road.maxFixedStepsPerFrame) {
     const nextTime = Math.min(cappedTarget, cursor + stepSeconds);
-    const dt = nextTime - cursor;
     runtime.currentSimTime = nextTime;
     spawnReadyTrucks(runtime, nextTime, hooks);
-    updateManeuvers(runtime, nextTime, hooks);
     startDepartures(runtime, nextTime, hooks);
-    updateLaneTraffic(runtime, dt, nextTime, hooks);
     updateCrane(runtime, nextTime, hooks);
     syncCompletion(runtime);
     cursor = nextTime;

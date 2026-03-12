@@ -2037,45 +2037,17 @@ async function runDayCycle(dayCycle, token) {
     truck.rotation.y = 0;
     return truck;
   });
-  const maxRoadLength = visuals.reduce((maxLength, truck) => {
-    const roadLength = Number(truck.userData?.roadLength);
-    if (!Number.isFinite(roadLength)) {
-      return maxLength;
-    }
-    return Math.max(maxLength, roadLength);
-  }, STEP.z * 0.84);
-
   const runtime = createDayRuntime(dayCycle, {
-    entryZ: world.trucks.entryZ,
-    exitZ: world.trucks.exitZ,
-    passingLaneX: world.trucks.passingLaneX,
     parkingLaneX: world.trucks.parkingLaneX,
     slotZ: world.trucks.slotZ,
     initialCranePose: state.cranePose,
     fixedStepSeconds: DAY_RUNTIME_STEP_SECONDS,
     maxFixedStepsPerFrame: DAY_RUNTIME_MAX_STEPS_PER_FRAME,
     maxSimAdvanceSeconds: MAX_SIM_SECONDS_PER_FRAME,
-    entryProgressDistance: 2.6,
-    approachBuffer: STEP.z * 0.34,
-    nominalRoadSpeed: STEP.z * 0.64,
-    roadAcceleration: STEP.z * 0.64,
-    roadBraking: STEP.z * 1.24,
-    stopDistance: Math.max(STEP.z * 0.48, maxRoadLength * 0.44),
-    brakingDistance: Math.max(STEP.z * 0.98, maxRoadLength * 0.9),
-    truckLength: Math.max(STEP.z * 0.72, maxRoadLength * 0.78),
     bayClearance: STEP.z * 0.88,
-    entrySpacing: Math.max(STEP.z * 0.62, maxRoadLength * 0.56),
     preferredVisibleTrucks: 2,
     maxVisibleTrucks: 3,
     dispatchLookaheadSeconds: 140,
-    mergeClearanceAhead: Math.max(STEP.z * 0.72, maxRoadLength * 0.62),
-    mergeClearanceBehind: Math.max(STEP.z * 0.92, maxRoadLength * 0.74),
-    mergePriorityStopDistance: Math.max(STEP.z * 0.34, maxRoadLength * 0.32),
-    parkingPriorityStopDistance: Math.max(STEP.z * 0.32, maxRoadLength * 0.28),
-    stuckTimeoutSeconds: 14,
-    parkingDuration: 2.4,
-    mergeDuration: 2.1,
-    mergeAdvanceDistance: STEP.z * 0.32,
   });
 
   runtime.truckActors.forEach((actor, index) => {
@@ -2085,7 +2057,7 @@ async function runDayCycle(dayCycle, token) {
   runtime.hooks = createDayRuntimeHooks(runtime);
 
   state.dayRuntime = runtime;
-  refs.statusText.textContent = `Running day schedule with independent road traffic (${jobs.length} truck jobs)...`;
+  refs.statusText.textContent = `Running day schedule in stable demo mode (${jobs.length} truck jobs)...`;
   syncDayRuntimeVisuals(runtime);
 
   await waitForSimulationStep(token, () => {

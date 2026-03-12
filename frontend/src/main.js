@@ -50,6 +50,10 @@ const ALGO_SETTINGS_SYNC_DEBOUNCE_MS = 450;
 const MAX_SIM_SECONDS_PER_FRAME = 120;
 const DAY_RUNTIME_STEP_SECONDS = 0.2;
 const DAY_RUNTIME_MAX_STEPS_PER_FRAME = Math.ceil(MAX_SIM_SECONDS_PER_FRAME / DAY_RUNTIME_STEP_SECONDS);
+const CLAW_LOCK_SECONDS = 4;
+const CLAW_UNLOCK_SECONDS = 4;
+const CLAW_OPEN = 1;
+const CLAW_CLOSED = 0;
 
 const CONTAINER_MIN_X = -TOTAL_WIDTH_WORLD / 2;
 const LANE_MIN_X = CONTAINER_MIN_X + YARD_WIDTH_WORLD;
@@ -340,6 +344,7 @@ state.cranePose = {
   x: stackXToWorld(2),
   z: stackZToWorld(0),
   hookY: world.crane.travelHookY,
+  claw: CLAW_OPEN,
 };
 
 function formatClock(secondsSinceMidnight) {
@@ -728,6 +733,45 @@ function createPoseSegment(start, end, fromPose, toPose) {
   };
 }
 
+function buildCraneCycleRanges(startTime, endTime, weightToSource, weightToDestination) {
+  const moveDuration = Math.max(0.05, endTime - startTime);
+  const hookDownWeight = 0.34;
+  const hookUpWeight = 0.24;
+  const fixedDuration = CLAW_LOCK_SECONDS + CLAW_UNLOCK_SECONDS;
+  const variableDuration = Math.max(0.001, moveDuration - fixedDuration);
+  const totalWeight = Math.max(
+    0.0001,
+    weightToSource + hookDownWeight + hookUpWeight + weightToDestination + hookDownWeight + hookUpWeight,
+  );
+
+  let clockCursor = startTime;
+  const takeVariableRange = (weight, forceEnd = false) => {
+    const rangeStart = clockCursor;
+    if (forceEnd) {
+      clockCursor = endTime;
+    } else {
+      clockCursor += variableDuration * (weight / totalWeight);
+    }
+    return { start: rangeStart, end: clockCursor };
+  };
+  const takeFixedRange = (durationSeconds) => {
+    const rangeStart = clockCursor;
+    clockCursor = Math.min(endTime, clockCursor + durationSeconds);
+    return { start: rangeStart, end: clockCursor };
+  };
+
+  return {
+    sourceRange: takeVariableRange(weightToSource),
+    lowerPickRange: takeVariableRange(hookDownWeight),
+    lockRange: takeFixedRange(CLAW_LOCK_SECONDS),
+    liftRange: takeVariableRange(hookUpWeight),
+    travelLoadedRange: takeVariableRange(weightToDestination),
+    lowerPlaceRange: takeVariableRange(hookDownWeight),
+    unlockRange: takeFixedRange(CLAW_UNLOCK_SECONDS),
+    clearRange: takeVariableRange(hookUpWeight, true),
+  };
+}
+
 function buildDayCranePlan(actor, startTime, cranePose) {
   const job = actor.job;
   const sourceStack = state.stacks?.[job.source.x]?.[job.source.z];
@@ -742,86 +786,84 @@ function buildDayCranePlan(actor, startTime, cranePose) {
   const pickLevel = sourceStack.length - 1;
   const pickY = stackToWorld(job.source.x, job.source.z, pickLevel).y + CONTAINER_VISUAL_HEIGHT * 0.5 + 0.58;
   const truckHookY = CONTAINER_VISUAL_HEIGHT + 1.9;
-  const moveDuration = Math.max(0.05, Number(job.craneTaskSeconds) || 0.05);
+  const moveEndTime = startTime + Math.max(0.05, Number(job.craneTaskSeconds) || 0.05);
 
   const startPose = {
     x: cranePose.x,
     z: cranePose.z,
     hookY: cranePose.hookY,
+    claw: Number.isFinite(cranePose.claw) ? cranePose.claw : CLAW_OPEN,
   };
   const sourceTravelPose = {
     x: sourceX,
     z: sourceZ,
     hookY: startPose.hookY,
+    claw: CLAW_OPEN,
   };
   const sourcePickupPose = {
     x: sourceX,
     z: sourceZ,
     hookY: pickY,
+    claw: CLAW_OPEN,
+  };
+  const sourceLockPose = {
+    x: sourceX,
+    z: sourceZ,
+    hookY: pickY,
+    claw: CLAW_CLOSED,
   };
   const sourceLiftPose = {
     x: sourceX,
     z: sourceZ,
     hookY: world.crane.travelHookY,
+    claw: CLAW_CLOSED,
   };
   const truckTravelPose = {
     x: truckDropX,
     z: truckDropZ,
     hookY: world.crane.travelHookY,
+    claw: CLAW_CLOSED,
   };
   const truckDropPose = {
     x: truckDropX,
     z: truckDropZ,
     hookY: truckHookY,
+    claw: CLAW_CLOSED,
+  };
+  const truckUnlockPose = {
+    x: truckDropX,
+    z: truckDropZ,
+    hookY: truckHookY,
+    claw: CLAW_OPEN,
   };
   const endPose = {
     x: truckDropX,
     z: truckDropZ,
     hookY: world.crane.travelHookY,
+    claw: CLAW_OPEN,
   };
 
   const weightToSource = Math.abs(sourceX - startPose.x) / STEP.x
     + YARD_CONFIG.lengthCostWeight * (Math.abs(sourceZ - startPose.z) / STEP.z);
   const weightToTruckDrop = Math.abs(truckDropX - sourceX) / STEP.x
     + YARD_CONFIG.lengthCostWeight * (Math.abs(truckDropZ - sourceZ) / STEP.z);
-  const hookDownWeight = 0.34;
-  const hookUpWeight = 0.24;
-  const totalWeight = Math.max(
-    0.0001,
-    weightToSource + hookDownWeight + hookUpWeight + weightToTruckDrop + hookDownWeight + hookUpWeight,
-  );
-
-  let clockCursor = startTime;
-  const takeClockRange = (weight, forceEnd = false) => {
-    const rangeStart = clockCursor;
-    if (forceEnd) {
-      clockCursor = startTime + moveDuration;
-    } else {
-      clockCursor += moveDuration * (weight / totalWeight);
-    }
-    return { start: rangeStart, end: clockCursor };
-  };
-
-  const sourceRange = takeClockRange(weightToSource);
-  const pickupRange = takeClockRange(hookDownWeight);
-  const liftRange = takeClockRange(hookUpWeight);
-  const truckRange = takeClockRange(weightToTruckDrop);
-  const dropRange = takeClockRange(hookDownWeight);
-  const clearRange = takeClockRange(hookUpWeight, true);
+  const ranges = buildCraneCycleRanges(startTime, moveEndTime, weightToSource, weightToTruckDrop);
 
   return {
     startTime,
-    pickupTime: pickupRange.end,
-    dropTime: dropRange.end,
-    endTime: clearRange.end,
+    pickupTime: ranges.lockRange.end,
+    dropTime: ranges.unlockRange.end,
+    endTime: ranges.clearRange.end,
     finalPose: endPose,
     segments: [
-      createPoseSegment(sourceRange.start, sourceRange.end, startPose, sourceTravelPose),
-      createPoseSegment(pickupRange.start, pickupRange.end, sourceTravelPose, sourcePickupPose),
-      createPoseSegment(liftRange.start, liftRange.end, sourcePickupPose, sourceLiftPose),
-      createPoseSegment(truckRange.start, truckRange.end, sourceLiftPose, truckTravelPose),
-      createPoseSegment(dropRange.start, dropRange.end, truckTravelPose, truckDropPose),
-      createPoseSegment(clearRange.start, clearRange.end, truckDropPose, endPose),
+      createPoseSegment(ranges.sourceRange.start, ranges.sourceRange.end, startPose, sourceTravelPose),
+      createPoseSegment(ranges.lowerPickRange.start, ranges.lowerPickRange.end, sourceTravelPose, sourcePickupPose),
+      createPoseSegment(ranges.lockRange.start, ranges.lockRange.end, sourcePickupPose, sourceLockPose),
+      createPoseSegment(ranges.liftRange.start, ranges.liftRange.end, sourceLockPose, sourceLiftPose),
+      createPoseSegment(ranges.travelLoadedRange.start, ranges.travelLoadedRange.end, sourceLiftPose, truckTravelPose),
+      createPoseSegment(ranges.lowerPlaceRange.start, ranges.lowerPlaceRange.end, truckTravelPose, truckDropPose),
+      createPoseSegment(ranges.unlockRange.start, ranges.unlockRange.end, truckDropPose, truckUnlockPose),
+      createPoseSegment(ranges.clearRange.start, ranges.clearRange.end, truckUnlockPose, endPose),
     ],
   };
 }
@@ -840,6 +882,7 @@ function syncDayRuntimeVisuals(runtime) {
   state.cranePose.x = runtime.crane.pose.x;
   state.cranePose.z = runtime.crane.pose.z;
   state.cranePose.hookY = runtime.crane.pose.hookY;
+  state.cranePose.claw = Number.isFinite(runtime.crane.pose.claw) ? runtime.crane.pose.claw : CLAW_OPEN;
 
   for (const actor of runtime.truckActors) {
     const truck = actor.visual;
@@ -1062,11 +1105,21 @@ function applyCranePose() {
   crane.group.position.z = state.cranePose.z;
   crane.trolley.position.x = state.cranePose.x - crane.centerX;
   crane.spreader.position.y = state.cranePose.hookY - crane.trolleyY;
+  const clawOpen = THREE.MathUtils.clamp(
+    Number.isFinite(state.cranePose.claw) ? state.cranePose.claw : CLAW_OPEN,
+    CLAW_CLOSED,
+    CLAW_OPEN,
+  );
 
   const ropeLength = Math.max(0.55, -crane.spreader.position.y - 0.2);
   for (const rope of crane.ropes) {
     rope.scale.y = ropeLength;
     rope.position.y = -ropeLength / 2;
+  }
+
+  for (const arm of crane.clawArms || []) {
+    arm.mesh.position.x = THREE.MathUtils.lerp(arm.closedX, arm.openX, clawOpen);
+    arm.mesh.position.z = THREE.MathUtils.lerp(arm.closedZ, arm.openZ, clawOpen);
   }
 
   if (state.carryingId) {
@@ -1717,6 +1770,7 @@ async function generateScenario(preparedRandomSetup = null) {
     x: stackXToWorld(2),
     z: stackZToWorld(0),
     hookY: world.crane.travelHookY,
+    claw: CLAW_OPEN,
   };
 
   rebuildContainerMeshes();
@@ -1850,6 +1904,17 @@ async function moveHook(targetY, token, clockRange = null) {
   });
 }
 
+async function animateClawGrip(targetClaw, token, clockRange = null) {
+  const startClaw = Number.isFinite(state.cranePose.claw) ? state.cranePose.claw : CLAW_OPEN;
+  const fallbackStart = state.phaseClockSeconds;
+  const fallbackDuration = CLAW_LOCK_SECONDS;
+  const start = clockRange ? clockRange.start : fallbackStart;
+  const end = clockRange ? clockRange.end : fallbackStart + fallbackDuration;
+  await animateBySimulationTime(start, end, token, (t) => {
+    state.cranePose.claw = THREE.MathUtils.lerp(startClaw, targetClaw, t);
+  });
+}
+
 function syncStackMesh(containerId, x, z, y) {
   const visual = world.containerVisuals.get(containerId);
   if (!visual) {
@@ -1879,36 +1944,25 @@ async function executeMove(move, token) {
   const destinationX = stackXToWorld(move.to.x);
   const destinationZ = stackZToWorld(move.to.z);
 
-  const moveDuration = Math.max(0.05, moveEnd - moveStart);
   const weightToSource = Math.abs(sourceX - state.cranePose.x) / STEP.x
     + YARD_CONFIG.lengthCostWeight * (Math.abs(sourceZ - state.cranePose.z) / STEP.z);
   const weightToDestination = Math.abs(destinationX - sourceX) / STEP.x
     + YARD_CONFIG.lengthCostWeight * (Math.abs(destinationZ - sourceZ) / STEP.z);
-  const hookDownWeight = 0.34;
-  const hookUpWeight = 0.24;
-  const totalWeight = Math.max(
-    0.0001,
-    weightToSource + hookDownWeight + hookUpWeight + weightToDestination + hookDownWeight + hookUpWeight,
-  );
-  let clockCursor = moveStart;
-  const takeClockRange = (weight, forceEnd = false) => {
-    const start = clockCursor;
-    if (forceEnd) {
-      clockCursor = moveEnd;
-    } else {
-      clockCursor += moveDuration * (weight / totalWeight);
-    }
-    return { start, end: clockCursor };
-  };
+  const ranges = buildCraneCycleRanges(moveStart, moveEnd, weightToSource, weightToDestination);
 
-  await moveCraneHorizontal(sourceX, sourceZ, token, takeClockRange(weightToSource));
+  await moveCraneHorizontal(sourceX, sourceZ, token, ranges.sourceRange);
   if (token !== state.runToken) {
     return;
   }
 
   const pickLevel = sourceStack.length - 1;
   const pickY = stackToWorld(move.from.x, move.from.z, pickLevel).y + CONTAINER_VISUAL_HEIGHT * 0.5 + 0.58;
-  await moveHook(pickY, token, takeClockRange(hookDownWeight));
+  await moveHook(pickY, token, ranges.lowerPickRange);
+  if (token !== state.runToken) {
+    return;
+  }
+
+  await animateClawGrip(CLAW_CLOSED, token, ranges.lockRange);
   if (token !== state.runToken) {
     return;
   }
@@ -1918,12 +1972,12 @@ async function executeMove(move, token) {
   updateProjections();
   updateStats();
 
-  await moveHook(world.crane.travelHookY, token, takeClockRange(hookUpWeight));
+  await moveHook(world.crane.travelHookY, token, ranges.liftRange);
   if (token !== state.runToken) {
     return;
   }
 
-  await moveCraneHorizontal(destinationX, destinationZ, token, takeClockRange(weightToDestination));
+  await moveCraneHorizontal(destinationX, destinationZ, token, ranges.travelLoadedRange);
   if (token !== state.runToken) {
     return;
   }
@@ -1932,7 +1986,12 @@ async function executeMove(move, token) {
   const placeLevel = destinationStack.length;
   const placeY = stackToWorld(move.to.x, move.to.z, placeLevel).y + CONTAINER_VISUAL_HEIGHT * 0.5 + 0.58;
 
-  await moveHook(placeY, token, takeClockRange(hookDownWeight));
+  await moveHook(placeY, token, ranges.lowerPlaceRange);
+  if (token !== state.runToken) {
+    return;
+  }
+
+  await animateClawGrip(CLAW_OPEN, token, ranges.unlockRange);
   if (token !== state.runToken) {
     return;
   }
@@ -1944,7 +2003,7 @@ async function executeMove(move, token) {
   updateProjections();
   updateStats();
 
-  await moveHook(world.crane.travelHookY, token, takeClockRange(hookUpWeight, true));
+  await moveHook(world.crane.travelHookY, token, ranges.clearRange);
   if (token !== state.runToken) {
     return;
   }

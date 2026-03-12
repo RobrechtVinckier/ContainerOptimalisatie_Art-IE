@@ -149,9 +149,9 @@
       "dayEndSeconds": 79200,
       "dayStartSeconds": 21600,
       "lengthCostWeight": 10,
-      "makespanSeconds": 1229.711667,
+      "makespanSeconds": 1373.711667,
       "remainingContainers": 0,
-      "score": 24.756009,
+      "score": 23.108439,
       "totalCraneWeightedCost": 157.0,
       "totalJobs": 18,
       "totalLaneWaitSeconds": 0.0,
@@ -231,14 +231,14 @@
     ],
     "first_last_moves": [
       {
-        "durationSeconds": 49.78,
+        "durationSeconds": 57.78,
         "from": {
           "x": 4,
           "y": 0,
           "z": 0
         },
         "id": "C0015",
-        "tEnd": 49.78,
+        "tEnd": 57.78,
         "tStart": 0.0,
         "to": {
           "x": 4,
@@ -248,15 +248,15 @@
         "weightedCost": 10
       },
       {
-        "durationSeconds": 63.936667,
+        "durationSeconds": 71.936667,
         "from": {
           "x": 0,
           "y": 0,
           "z": 1
         },
         "id": "C0001",
-        "tEnd": 113.716667,
-        "tStart": 49.78,
+        "tEnd": 129.716667,
+        "tStart": 57.78,
         "to": {
           "x": 0,
           "y": 0,
@@ -265,15 +265,15 @@
         "weightedCost": 10
       },
       {
-        "durationSeconds": 63.936667,
+        "durationSeconds": 71.936667,
         "from": {
           "x": 3,
           "y": 0,
           "z": 2
         },
         "id": "C0013",
-        "tEnd": 177.653333,
-        "tStart": 113.716667,
+        "tEnd": 201.653333,
+        "tStart": 129.716667,
         "to": {
           "x": 2,
           "y": 0,
@@ -282,15 +282,15 @@
         "weightedCost": 11
       },
       {
-        "durationSeconds": 76.126667,
+        "durationSeconds": 84.126667,
         "from": {
           "x": 4,
           "y": 0,
           "z": 3
         },
         "id": "C0018",
-        "tEnd": 253.78,
-        "tStart": 177.653333,
+        "tEnd": 285.78,
+        "tStart": 201.653333,
         "to": {
           "x": 2,
           "y": 0,
@@ -299,15 +299,15 @@
         "weightedCost": 22
       },
       {
-        "durationSeconds": 54.418333,
+        "durationSeconds": 62.418333,
         "from": {
           "x": 2,
           "y": 0,
           "z": 6
         },
         "id": "C0010",
-        "tEnd": 308.198333,
-        "tStart": 253.78,
+        "tEnd": 348.198333,
+        "tStart": 285.78,
         "to": {
           "x": 1,
           "y": 1,
@@ -316,32 +316,15 @@
         "weightedCost": 1
       },
       {
-        "durationSeconds": 37.59,
-        "from": {
-          "x": 3,
-          "y": 1,
-          "z": 8
-        },
-        "id": "C0018",
-        "tEnd": 4652.048333,
-        "tStart": 4614.458333,
-        "to": {
-          "x": 4,
-          "y": 1,
-          "z": 8
-        },
-        "weightedCost": 1.0
-      },
-      {
-        "durationSeconds": 37.59,
+        "durationSeconds": 45.59,
         "from": {
           "x": 3,
           "y": 0,
           "z": 8
         },
         "id": "C0014",
-        "tEnd": 4689.638333,
-        "tStart": 4652.048333,
+        "tEnd": 5205.891667,
+        "tStart": 5160.301667,
         "to": {
           "x": 4,
           "y": 2,
@@ -350,15 +333,15 @@
         "weightedCost": 1.0
       },
       {
-        "durationSeconds": 100.506667,
+        "durationSeconds": 108.506667,
         "from": {
           "x": 2,
           "y": 0,
           "z": 4
         },
         "id": "C0013",
-        "tEnd": 4790.145,
-        "tStart": 4689.638333,
+        "tEnd": 5314.398333,
+        "tStart": 5205.891667,
         "to": {
           "x": 4,
           "y": 0,
@@ -367,15 +350,32 @@
         "weightedCost": 2.0
       },
       {
-        "durationSeconds": 68.301667,
+        "durationSeconds": 73.156667,
+        "from": {
+          "x": 1,
+          "y": 0,
+          "z": 3
+        },
+        "id": "C0008",
+        "tEnd": 5387.555,
+        "tStart": 5314.398333,
+        "to": {
+          "x": 3,
+          "y": 0,
+          "z": 3
+        },
+        "weightedCost": 2.0
+      },
+      {
+        "durationSeconds": 62.891667,
         "from": {
           "x": 3,
           "y": 0,
           "z": 1
         },
         "id": "C0012",
-        "tEnd": 4858.446667,
-        "tStart": 4790.145,
+        "tEnd": 5450.446667,
+        "tStart": 5387.555,
         "to": {
           "x": 4,
           "y": 3,
@@ -384,15 +384,15 @@
         "weightedCost": 1.0
       },
       {
-        "durationSeconds": 85.876667,
+        "durationSeconds": 93.876667,
         "from": {
           "x": 3,
           "y": 0,
           "z": 3
         },
         "id": "C0008",
-        "tEnd": 4944.323333,
-        "tStart": 4858.446667,
+        "tEnd": 5544.323333,
+        "tStart": 5450.446667,
         "to": {
           "x": 4,
           "y": 0,
@@ -417,7 +417,7 @@
       "tabuSearchMoveCount": 1500,
       "tabuStopReason": "iters_exhausted",
       "tabuUniqueContainersMoved": 15,
-      "timeUsedSeconds": 4944.323333,
+      "timeUsedSeconds": 5544.323333,
       "totalMoves": 75
     },
     "solved": false,

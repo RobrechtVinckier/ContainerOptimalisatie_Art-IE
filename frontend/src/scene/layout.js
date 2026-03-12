@@ -216,6 +216,28 @@ export function buildCrane(group, metrics) {
   spreaderBody.castShadow = true;
   spreader.add(spreaderBody);
 
+  const clawMaterial = new THREE.MeshStandardMaterial({ color: "#2a3138", roughness: 0.52, metalness: 0.22 });
+  const clawArms = [];
+  for (const sideX of [-1, 1]) {
+    for (const sideZ of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.05, 0.18), clawMaterial);
+      arm.castShadow = true;
+      const closedX = sideX * (containerDim.x * 0.43);
+      const openX = sideX * (containerDim.x * 0.56);
+      const closedZ = sideZ * (containerDim.z * 0.34);
+      const openZ = sideZ * (containerDim.z * 0.42);
+      arm.position.set(openX, 0.7, openZ);
+      spreader.add(arm);
+      clawArms.push({
+        mesh: arm,
+        closedX,
+        openX,
+        closedZ,
+        openZ,
+      });
+    }
+  }
+
   const ropeOffsets = [
     new THREE.Vector3(-0.75, 0, -containerDim.z * 0.35),
     new THREE.Vector3(0.75, 0, -containerDim.z * 0.35),
@@ -238,6 +260,7 @@ export function buildCrane(group, metrics) {
     group: craneGroup,
     trolley,
     spreader,
+    clawArms,
     ropes,
     centerX,
     trolleyY,

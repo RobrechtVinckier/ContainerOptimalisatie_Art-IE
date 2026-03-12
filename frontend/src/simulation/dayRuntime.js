@@ -218,13 +218,17 @@ function setCranePose(runtime, pose) {
   runtime.crane.pose.x = pose.x;
   runtime.crane.pose.z = pose.z;
   runtime.crane.pose.hookY = pose.hookY;
+  runtime.crane.pose.claw = Number.isFinite(pose.claw) ? pose.claw : runtime.crane.pose.claw;
 }
 
 function interpolatePose(fromPose, toPose, value) {
+  const fromClaw = Number.isFinite(fromPose.claw) ? fromPose.claw : 1;
+  const toClaw = Number.isFinite(toPose.claw) ? toPose.claw : fromClaw;
   return {
     x: lerp(fromPose.x, toPose.x, value),
     z: lerp(fromPose.z, toPose.z, value),
     hookY: lerp(fromPose.hookY, toPose.hookY, value),
+    claw: lerp(fromClaw, toClaw, value),
   };
 }
 
@@ -390,6 +394,7 @@ export function createDayRuntime(dayCycle, config = {}) {
         x: Number(config.initialCranePose?.x) || 0,
         z: Number(config.initialCranePose?.z) || 0,
         hookY: Number(config.initialCranePose?.hookY) || 0,
+        claw: Number.isFinite(config.initialCranePose?.claw) ? Number(config.initialCranePose.claw) : 1,
       },
       activeActorKey: null,
       plan: null,

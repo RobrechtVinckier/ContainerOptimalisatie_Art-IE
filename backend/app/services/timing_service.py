@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from ..core.constants import (
+    CLAW_LOCK_SECONDS,
+    CLAW_UNLOCK_SECONDS,
     CONTAINER_METERS,
     LENGTH_COST_WEIGHT,
     LENGTH_SPEED_MPS,
@@ -62,8 +64,10 @@ def crane_move_seconds(
     return (
         horizontal_to_source
         + lower_empty
+        + CLAW_LOCK_SECONDS
         + lift_loaded
         + horizontal_with_load
         + lower_loaded
+        + CLAW_UNLOCK_SECONDS
         + raise_empty
     )

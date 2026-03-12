@@ -5,6 +5,7 @@ import { getAlgorithmSettings, requestRandomConfiguration, requestSolvePlan, upd
 import { YARD_CONFIG, cloneStacks, placementScoreWeightsFromAlgorithmSettings, resolveColorHex, summarizeStacks } from "./config/yardModel.js";
 import { buildCrane, buildGround } from "./scene/layout.js";
 import { buildTrucks, clearTruckCargo, createTruckModel, formatTruckDisplayId, setTruckCargo } from "./scene/trucks.js";
+import { renderDayTimeline } from "./ui/dayTimeline.js";
 
 const SCALE = 0.72;
 const CONTAINER_DIM = Object.freeze({
@@ -121,6 +122,13 @@ app.innerHTML = `
             <div><label>Makespan</label><strong id="runtime-makespan">-</strong></div>
             <div><label>Remaining @ 22:00</label><strong id="runtime-remaining">-</strong></div>
           </div>
+        </section>
+        <section class="timeline-panel">
+          <div class="timeline-panel-header">
+            <h3>Day Timeline</h3>
+            <span>Truck schedule from 06:00 to 22:00</span>
+          </div>
+          <div id="day-timeline"></div>
         </section>
       </section>
 
@@ -241,6 +249,7 @@ const refs = {
   runtimeLaneWait: document.getElementById("runtime-lane-wait"),
   runtimeMakespan: document.getElementById("runtime-makespan"),
   runtimeRemaining: document.getElementById("runtime-remaining"),
+  dayTimeline: document.getElementById("day-timeline"),
   eyeButtons: Array.from(document.querySelectorAll(".eye-btn")),
   projections: {
     top: document.getElementById("view-top"),
@@ -274,6 +283,7 @@ const state = {
   nightStats: null,
   dayCyclePlan: null,
   dayStats: null,
+  activeDayJobIndex: -1,
   clockRunning: false,
   clockBoost: 1,
   lastProjectionDrawAt: 0,
@@ -369,6 +379,13 @@ function clearRuntimeStats() {
   refs.runtimeRemaining.textContent = "-";
 }
 
+function updateDayTimeline() {
+  renderDayTimeline(refs.dayTimeline, state.dayCyclePlan, {
+    activeJobIndex: state.activeDayJobIndex,
+    formatTruckLabel: formatTruckDisplayId,
+  });
+}
+
 function updateRuntimeStats() {
   const night = state.nightStats;
   const day = state.dayStats;
@@ -379,6 +396,7 @@ function updateRuntimeStats() {
   refs.runtimeLaneWait.textContent = day ? formatDuration(day.totalLaneWaitSeconds) : "-";
   refs.runtimeMakespan.textContent = day ? formatDuration(day.makespanSeconds) : "-";
   refs.runtimeRemaining.textContent = day ? `${day.remainingContainers}` : "-";
+  updateDayTimeline();
 }
 
 function toNullableInteger(rawValue) {
@@ -1407,6 +1425,7 @@ async function generateScenario(preparedRandomSetup = null) {
   state.nightStats = null;
   state.dayCyclePlan = null;
   state.dayStats = null;
+  state.activeDayJobIndex = -1;
   refs.pauseBtn.disabled = true;
   refs.pauseBtn.textContent = "Pause";
   refs.statusText.textContent = "Requesting random container layout from backend...";
@@ -1421,6 +1440,7 @@ async function generateScenario(preparedRandomSetup = null) {
   setClockPhaseBase(NIGHT_CLOCK_BASE_SECONDS);
   setPhaseClock(0);
   clearRuntimeStats();
+  updateDayTimeline();
   resetTruckFleet();
 
   setBusyUi(true);
@@ -1854,6 +1874,7 @@ async function runDayCycle(dayCycle, token) {
   const dayDurationSeconds = dayCycle?.stats?.dayDurationSeconds ?? DAY_DURATION_SECONDS;
   state.dayCyclePlan = dayCycle;
   state.dayStats = dayCycle?.stats || null;
+  state.activeDayJobIndex = -1;
   updateRuntimeStats();
   setCyclePhase("dayRunning");
   setClockPhaseBase(DAY_CLOCK_BASE_SECONDS);
@@ -1874,6 +1895,8 @@ async function runDayCycle(dayCycle, token) {
       return;
     }
     const job = jobs[index];
+    state.activeDayJobIndex = index;
+    updateDayTimeline();
     refs.statusText.textContent = `Day cycle: loading ${job.containerId} onto ${job.truckId} (${job.company}).`;
     await executeDayJob(job, token);
     if (token !== state.runToken) {
@@ -1888,6 +1911,8 @@ async function runDayCycle(dayCycle, token) {
     return;
   }
 
+  state.activeDayJobIndex = -1;
+  updateDayTimeline();
   await advancePhaseClockTo(dayDurationSeconds, token, { boost: 48 });
 }
 
@@ -1942,6 +1967,7 @@ async function solveScenario() {
   state.nightStats = plan.nightStats || null;
   state.dayCyclePlan = plan.dayCycle || null;
   state.dayStats = plan.dayCycle?.stats || null;
+  state.activeDayJobIndex = -1;
   updateRuntimeStats();
 
   state.moveTotal = plan.moves.length;

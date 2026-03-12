@@ -123,6 +123,31 @@ def _color_zone_map(ordered_colors: List[str]) -> Dict[str, int]:
     }
 
 
+def _zone_window(zone_index: int) -> Tuple[float, float]:
+    zone_length = DAY_DURATION_SECONDS / 3.0
+    overlap = zone_length * 0.18
+    start = zone_index * zone_length - (overlap if zone_index > 0 else 0.0)
+    end = (zone_index + 1) * zone_length + (overlap if zone_index < 2 else 0.0)
+    return max(0.0, start), min(float(DAY_DURATION_SECONDS), end)
+
+
+def _target_load_start(
+    *,
+    color_name: str,
+    trip_index: int,
+    total_trips: int,
+    color_zone_by_name: Dict[str, int],
+) -> float:
+    zone_index = color_zone_by_name.get(color_name, 1)
+    window_start, window_end = _zone_window(zone_index)
+    usable_start = window_start + (window_end - window_start) * 0.08
+    usable_end = window_end - (window_end - window_start) * 0.08
+    if total_trips <= 1:
+        return (usable_start + usable_end) * 0.5
+    fraction = trip_index / max(1, total_trips - 1)
+    return usable_start + (usable_end - usable_start) * fraction
+
+
 def estimate_truck_timing(
     *,
     load_start: float,
@@ -152,9 +177,11 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
             for container in working[x][z]:
                 color_name = container["color"]
                 remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) + 1
+    total_by_color = dict(remaining_by_color)
     company_profiles = {color_name: _company_profile_for_color(color_name) for color_name in remaining_by_color}
     preferred_color_order = _preferred_color_order(remaining_by_color)
     color_zone_by_name = _color_zone_map(preferred_color_order)
+    scheduled_trips_by_color: Dict[str, int] = {color_name: 0 for color_name in remaining_by_color}
     slot_z_map = [slot_to_stack_z(slot) for slot in range(DAY_TRUCK_SLOTS)]
     slot_free_at = [0.0] * DAY_TRUCK_SLOTS
     lane_flow_free_at = 0.0
@@ -216,11 +243,22 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                     dst_z=slot_z,
                     dst_level=0,
                 )
-                tentative_load_start = max(crane_time, slot_free_at[slot_index])
+                trip_index = scheduled_trips_by_color.get(container["color"], 0)
+                target_load_start = _target_load_start(
+                    color_name=container["color"],
+                    trip_index=trip_index,
+                    total_trips=total_by_color.get(container["color"], 1),
+                    color_zone_by_name=color_zone_by_name,
+                )
+                zone_start, zone_end = _zone_window(color_zone_by_name.get(container["color"], 1))
+                release_slack = (zone_end - zone_start) * 0.14
+                release_time = max(zone_start, target_load_start - release_slack)
+                tentative_load_start = max(crane_time, slot_free_at[slot_index], release_time)
                 tentative_load_end = tentative_load_start + crane_task_seconds
                 phase_ratio = min(0.999999, max(0.0, tentative_load_start / float(DAY_DURATION_SECONDS)))
                 current_zone = min(2, int(phase_ratio * 3.0))
                 phase_alignment_penalty = abs(color_zone_by_name.get(container["color"], 1) - current_zone) * 180.0
+                schedule_spread_penalty = abs(tentative_load_start - target_load_start) * 0.06
                 arrival_time, depart_time, lane_wait_seconds = estimate_truck_timing(
                     load_start=tentative_load_start,
                     load_end=tentative_load_end,
@@ -244,6 +282,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
                     + horizontal_weighted_cost * DAY_ENERGY_WEIGHT
                     + company_switch_penalty
                     + phase_alignment_penalty
+                    + schedule_spread_penalty
                     + same_company_bonus
                     + rng.random() * 0.001
                 )
@@ -303,6 +342,7 @@ def build_day_cycle_plan(stacks: List[List[List[dict]]], day_seed: int) -> dict:
         remaining_by_color[color_name] = remaining_by_color.get(color_name, 0) - 1
         if remaining_by_color[color_name] <= 0:
             active_group_color = None
+        scheduled_trips_by_color[color_name] = scheduled_trips_by_color.get(color_name, 0) + 1
 
         lane_flow_free_at = arrival_time + TRUCK_FLOW_HEADWAY_SECONDS
         lane_flow_free_at = depart_time + TRUCK_FLOW_HEADWAY_SECONDS

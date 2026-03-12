@@ -1,17 +1,21 @@
 {
   "algorithm_cli_signature_seed_1": {
-    "firstMoveLines": [],
+    "firstMoveLines": [
+      "  t=    7.50->   10.00  cid=   5  (1, 0)->(0, 0)",
+      "  t=   10.00->   14.50  cid=   6  (0, 1)->(2, 1)",
+      "  t=   14.50->   19.50  cid=   3  (2, 0)->(0, 1)"
+    ],
     "greedyBudgetSeconds": 28800.0,
-    "greedyClusterEnd": 3.0,
+    "greedyClusterEnd": 15.0,
     "greedyClusterStart": 17.5,
-    "greedyMoves": 5,
-    "greedyTimeUsedSeconds": 30.0,
+    "greedyMoves": 2,
+    "greedyTimeUsedSeconds": 7.5,
     "initialClusterCost": 17.5,
-    "tabuBestTimeUsedSeconds": 30.0,
+    "tabuBestTimeUsedSeconds": 47.0,
     "tabuBudgetSeconds": 28800.0,
     "tabuClusterEnd": 3.0,
     "tabuClusterStart": 17.5,
-    "tabuMovesApplied": 0,
+    "tabuMovesApplied": 8,
     "truncatedMoveCount": 0
   },
   "random_configuration_seed_2025_count_18": {
@@ -128,8 +132,8 @@
         "green": 4,
         "red": 9
       },
-      "inTargetSlot": 10,
-      "placementScore": 0.5702702702702703,
+      "inTargetSlot": 12,
+      "placementScore": 0.6573170731707317,
       "total": 18
     }
   },
@@ -145,10 +149,10 @@
       "dayEndSeconds": 79200,
       "dayStartSeconds": 21600,
       "lengthCostWeight": 10,
-      "makespanSeconds": 52692.306667,
+      "makespanSeconds": 52684.986667,
       "remainingContainers": 0,
-      "score": 0.924346,
-      "totalCraneWeightedCost": 279.0,
+      "score": 0.932401,
+      "totalCraneWeightedCost": 187.0,
       "totalJobs": 18,
       "totalLaneWaitSeconds": 0.0,
       "trucksUsed": 18
@@ -159,8 +163,8 @@
         "green": 4,
         "red": 9
       },
-      "inTargetSlot": 17,
-      "placementScore": 0.9576576576576576,
+      "inTargetSlot": 18,
+      "placementScore": 0.9947154471544716,
       "total": 18
     },
     "final_heights": [
@@ -171,7 +175,7 @@
         0,
         0,
         0,
-        3,
+        0,
         0,
         0,
         0
@@ -180,48 +184,48 @@
         0,
         0,
         0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
         4,
-        0,
-        0,
-        2,
-        0,
         1,
-        0
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0
-      ],
-      [
-        0,
         4,
+        1,
         0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        4,
+        3,
+        2,
+        3,
         0
       ]
     ],
@@ -244,179 +248,179 @@
         "weightedCost": 10
       },
       {
-        "durationSeconds": 71.488333,
+        "durationSeconds": 63.936667,
         "from": {
           "x": 0,
           "y": 0,
           "z": 1
         },
         "id": "C0001",
-        "tEnd": 121.268333,
+        "tEnd": 113.716667,
         "tStart": 49.78,
         "to": {
-          "x": 1,
-          "y": 1,
-          "z": 3
+          "x": 0,
+          "y": 0,
+          "z": 2
         },
-        "weightedCost": 21
+        "weightedCost": 10
       },
       {
-        "durationSeconds": 64.41,
+        "durationSeconds": 63.936667,
         "from": {
           "x": 3,
           "y": 0,
           "z": 2
         },
         "id": "C0013",
-        "tEnd": 185.678333,
-        "tStart": 121.268333,
+        "tEnd": 177.653333,
+        "tStart": 113.716667,
         "to": {
-          "x": 1,
-          "y": 2,
+          "x": 2,
+          "y": 0,
           "z": 3
         },
-        "weightedCost": 12
+        "weightedCost": 11
       },
       {
-        "durationSeconds": 57.331667,
-        "from": {
-          "x": 3,
-          "y": 0,
-          "z": 1
-        },
-        "id": "C0012",
-        "tEnd": 243.01,
-        "tStart": 185.678333,
-        "to": {
-          "x": 4,
-          "y": 3,
-          "z": 1
-        },
-        "weightedCost": 1
-      },
-      {
-        "durationSeconds": 84.656667,
+        "durationSeconds": 76.126667,
         "from": {
           "x": 4,
           "y": 0,
           "z": 3
         },
         "id": "C0018",
-        "tEnd": 327.666667,
-        "tStart": 243.01,
+        "tEnd": 253.78,
+        "tStart": 177.653333,
         "to": {
-          "x": 3,
+          "x": 2,
           "y": 0,
-          "z": 4
+          "z": 5
         },
-        "weightedCost": 11
+        "weightedCost": 22
       },
       {
-        "durationSeconds": 36.37,
-        "from": {
-          "x": 3,
-          "y": 2,
-          "z": 8
-        },
-        "id": "C0007",
-        "tEnd": 1321.353333,
-        "tStart": 1284.983333,
-        "to": {
-          "x": 4,
-          "y": 0,
-          "z": 8
-        },
-        "weightedCost": 1.0
-      },
-      {
-        "durationSeconds": 37.59,
-        "from": {
-          "x": 3,
-          "y": 1,
-          "z": 8
-        },
-        "id": "C0014",
-        "tEnd": 1358.943333,
-        "tStart": 1321.353333,
-        "to": {
-          "x": 4,
-          "y": 1,
-          "z": 8
-        },
-        "weightedCost": 1.0
-      },
-      {
-        "durationSeconds": 37.59,
-        "from": {
-          "x": 3,
-          "y": 0,
-          "z": 8
-        },
-        "id": "C0002",
-        "tEnd": 1396.533333,
-        "tStart": 1358.943333,
-        "to": {
-          "x": 4,
-          "y": 2,
-          "z": 8
-        },
-        "weightedCost": 1.0
-      },
-      {
-        "durationSeconds": 50.526667,
+        "durationSeconds": 54.418333,
         "from": {
           "x": 2,
           "y": 0,
+          "z": 6
+        },
+        "id": "C0010",
+        "tEnd": 308.198333,
+        "tStart": 253.78,
+        "to": {
+          "x": 1,
+          "y": 1,
+          "z": 6
+        },
+        "weightedCost": 1
+      },
+      {
+        "durationSeconds": 37.59,
+        "from": {
+          "x": 3,
+          "y": 1,
           "z": 8
         },
-        "id": "C0011",
-        "tEnd": 1447.06,
-        "tStart": 1396.533333,
+        "id": "C0018",
+        "tEnd": 4652.048333,
+        "tStart": 4614.458333,
         "to": {
-          "x": 3,
-          "y": 0,
+          "x": 4,
+          "y": 1,
           "z": 8
         },
         "weightedCost": 1.0
       },
       {
-        "durationSeconds": 30.511667,
+        "durationSeconds": 37.59,
         "from": {
           "x": 3,
           "y": 0,
           "z": 8
         },
-        "id": "C0011",
-        "tEnd": 1477.571667,
-        "tStart": 1447.06,
+        "id": "C0014",
+        "tEnd": 4689.638333,
+        "tStart": 4652.048333,
         "to": {
           "x": 4,
-          "y": 3,
+          "y": 2,
           "z": 8
         },
         "weightedCost": 1.0
+      },
+      {
+        "durationSeconds": 100.506667,
+        "from": {
+          "x": 2,
+          "y": 0,
+          "z": 4
+        },
+        "id": "C0013",
+        "tEnd": 4790.145,
+        "tStart": 4689.638333,
+        "to": {
+          "x": 4,
+          "y": 0,
+          "z": 4
+        },
+        "weightedCost": 2.0
+      },
+      {
+        "durationSeconds": 68.301667,
+        "from": {
+          "x": 3,
+          "y": 0,
+          "z": 1
+        },
+        "id": "C0012",
+        "tEnd": 4858.446667,
+        "tStart": 4790.145,
+        "to": {
+          "x": 4,
+          "y": 3,
+          "z": 1
+        },
+        "weightedCost": 1.0
+      },
+      {
+        "durationSeconds": 85.876667,
+        "from": {
+          "x": 3,
+          "y": 0,
+          "z": 3
+        },
+        "id": "C0008",
+        "tEnd": 4944.323333,
+        "tStart": 4858.446667,
+        "to": {
+          "x": 4,
+          "y": 0,
+          "z": 2
+        },
+        "weightedCost": 11.0
       }
     ],
-    "moves_len": 24,
+    "moves_len": 75,
     "nightStats": {
       "budgetSeconds": 28800.0,
-      "dayPrepMoveCount": 8,
-      "endPlacementScore": 0.957658,
-      "greedyMoveCount": 4,
+      "dayPrepMoveCount": 17,
+      "endPlacementScore": 0.994715,
+      "greedyMoveCount": 0,
       "lengthCostWeight": 10,
-      "startPlacementScore": 0.57027,
-      "tabuImmediateReversals": 622,
-      "tabuMoveCount": 12,
+      "startPlacementScore": 0.657317,
+      "tabuImmediateReversals": 419,
+      "tabuMoveCount": 58,
       "tabuRelinkSteps": 0,
-      "tabuRepeatedEdges": 1268,
+      "tabuRepeatedEdges": 1161,
       "tabuRestarts": 0,
       "tabuSearchMoveCount": 1500,
       "tabuStopReason": "iters_exhausted",
-      "tabuUniqueContainersMoved": 8,
-      "timeUsedSeconds": 1477.571667,
-      "totalMoves": 24
+      "tabuUniqueContainersMoved": 15,
+      "timeUsedSeconds": 4944.323333,
+      "totalMoves": 75
     },
     "solved": false,
-    "totalWeightedCost": 264.0
+    "totalWeightedCost": 1099.0
   }
 }

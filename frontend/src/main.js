@@ -42,6 +42,8 @@ const DAY_DURATION_SECONDS = 16 * 3600;
 const MAX_RANDOM_CONTAINER_COUNT = YARD_CONFIG.width * YARD_CONFIG.length * YARD_CONFIG.height;
 const MAX_RANDOM_MOVABLE_CONTAINER_COUNT = Math.max(1, MAX_RANDOM_CONTAINER_COUNT - 1);
 const MAX_PLAYBACK_SPEED = 1000;
+const PLAYBACK_BOOST_1 = 1000;
+const PLAYBACK_BOOST_2 = 10000;
 const DEFAULT_RANDOM_GROUPS = 3;
 const FAST_FORWARD_SPEED_THRESHOLD = 70;
 const FAST_FORWARD_PROJECTION_THROTTLE_MS = 90;
@@ -99,8 +101,8 @@ app.innerHTML = `
         </div>
         <input id="speed-slider" type="range" min="1" max="${MAX_PLAYBACK_SPEED}" step="1" value="1" />
         <div class="speed-boosts">
-          <label class="boost-toggle" for="boost-10-toggle"><input id="boost-10-toggle" type="checkbox" /> <span>10x boost</span></label>
-          <label class="boost-toggle" for="boost-100-toggle"><input id="boost-100-toggle" type="checkbox" /> <span>100x boost</span></label>
+          <label class="boost-toggle" for="boost-1000-toggle"><input id="boost-1000-toggle" type="checkbox" /> <span>1000x boost</span></label>
+          <label class="boost-toggle" for="boost-10000-toggle"><input id="boost-10000-toggle" type="checkbox" /> <span>10000x boost</span></label>
           <strong id="effective-speed">Effective 1x</strong>
         </div>
       </div>
@@ -232,8 +234,8 @@ const refs = {
   pauseBtn: document.getElementById("pause-btn"),
   speedSlider: document.getElementById("speed-slider"),
   speedValue: document.getElementById("speed-value"),
-  boost10Toggle: document.getElementById("boost-10-toggle"),
-  boost100Toggle: document.getElementById("boost-100-toggle"),
+  boost1000Toggle: document.getElementById("boost-1000-toggle"),
+  boost10000Toggle: document.getElementById("boost-10000-toggle"),
   effectiveSpeed: document.getElementById("effective-speed"),
   passthroughToggle: document.getElementById("passthrough-toggle"),
   cycleBox: document.getElementById("cycle-box"),
@@ -373,8 +375,8 @@ function effectivePlaybackSpeed() {
 function updatePlaybackSpeedUi() {
   refs.speedSlider.value = String(state.speed);
   refs.speedValue.textContent = `${state.speed}x`;
-  refs.boost10Toggle.checked = state.speedBoost === 10;
-  refs.boost100Toggle.checked = state.speedBoost === 100;
+  refs.boost1000Toggle.checked = state.speedBoost === PLAYBACK_BOOST_1;
+  refs.boost10000Toggle.checked = state.speedBoost === PLAYBACK_BOOST_2;
   refs.effectiveSpeed.textContent = `Effective ${effectivePlaybackSpeed()}x`;
 }
 
@@ -557,12 +559,12 @@ refs.speedSlider.addEventListener("input", (event) => {
   setPlaybackSpeed(event.target.value, state.speedBoost);
 });
 
-refs.boost10Toggle.addEventListener("change", (event) => {
-  setPlaybackSpeed(state.speed, event.target.checked ? 10 : 1);
+refs.boost1000Toggle.addEventListener("change", (event) => {
+  setPlaybackSpeed(state.speed, event.target.checked ? PLAYBACK_BOOST_1 : 1);
 });
 
-refs.boost100Toggle.addEventListener("change", (event) => {
-  setPlaybackSpeed(state.speed, event.target.checked ? 100 : 1);
+refs.boost10000Toggle.addEventListener("change", (event) => {
+  setPlaybackSpeed(state.speed, event.target.checked ? PLAYBACK_BOOST_2 : 1);
 });
 
 for (const field of [

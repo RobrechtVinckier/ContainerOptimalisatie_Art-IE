@@ -364,10 +364,17 @@ function effectivePlaybackSpeed() {
 }
 
 function updatePlaybackSpeedUi() {
+  refs.speedSlider.value = String(state.speed);
   refs.speedValue.textContent = `${state.speed}x`;
   refs.boost10Toggle.checked = state.speedBoost === 10;
   refs.boost100Toggle.checked = state.speedBoost === 100;
   refs.effectiveSpeed.textContent = `Effective ${effectivePlaybackSpeed()}x`;
+}
+
+function setPlaybackSpeed(baseSpeed, boost = 1) {
+  state.speed = Math.min(MAX_PLAYBACK_SPEED, Math.max(1, Math.round(Number(baseSpeed) || 1)));
+  state.speedBoost = Math.max(1, Math.round(Number(boost) || 1));
+  updatePlaybackSpeedUi();
 }
 
 function setCyclePhase(phase, detail = "") {
@@ -533,19 +540,15 @@ refs.pauseBtn.addEventListener("click", () => {
 });
 
 refs.speedSlider.addEventListener("input", (event) => {
-  state.speed = Math.min(MAX_PLAYBACK_SPEED, Math.max(1, Math.round(Number(event.target.value) || 1)));
-  event.target.value = String(state.speed);
-  updatePlaybackSpeedUi();
+  setPlaybackSpeed(event.target.value, state.speedBoost);
 });
 
 refs.boost10Toggle.addEventListener("change", (event) => {
-  state.speedBoost = event.target.checked ? 10 : 1;
-  updatePlaybackSpeedUi();
+  setPlaybackSpeed(state.speed, event.target.checked ? 10 : 1);
 });
 
 refs.boost100Toggle.addEventListener("change", (event) => {
-  state.speedBoost = event.target.checked ? 100 : 1;
-  updatePlaybackSpeedUi();
+  setPlaybackSpeed(state.speed, event.target.checked ? 100 : 1);
 });
 
 for (const field of [
@@ -2012,6 +2015,7 @@ async function runDayCycle(dayCycle, token) {
   state.dayStats = dayCycle?.stats || null;
   state.activeDayJobIndex = -1;
   updateRuntimeStats();
+  setPlaybackSpeed(1, 1);
   setCyclePhase("dayRunning");
   setClockPhaseBase(DAY_CLOCK_BASE_SECONDS);
   setPhaseClock(0);

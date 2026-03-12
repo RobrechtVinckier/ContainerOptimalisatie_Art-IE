@@ -5,6 +5,13 @@ const SKY_DAWN = new THREE.Color("#f0b46b");
 const SKY_DAY = new THREE.Color("#dcefff");
 const FOG_NIGHT = new THREE.Color("#102131");
 const FOG_DAY = new THREE.Color("#d8e6f4");
+const CELESTIAL_RADIUS_X = 88;
+const CELESTIAL_RADIUS_Y = 74;
+const CELESTIAL_HORIZON_Y = 9;
+const CELESTIAL_SUN_START_Z = 34;
+const CELESTIAL_SUN_END_Z = -26;
+const CELESTIAL_MOON_START_Z = 28;
+const CELESTIAL_MOON_END_Z = -32;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -38,6 +45,16 @@ function moonProgress(timeSeconds) {
     return (timeSeconds + 2 * 3600) / nightDuration;
   }
   return null;
+}
+
+function celestialArcPosition(progress, startZ, endZ) {
+  const t = clamp01(progress);
+  const angle = t * Math.PI;
+  return new THREE.Vector3(
+    Math.cos(angle) * CELESTIAL_RADIUS_X,
+    CELESTIAL_HORIZON_Y + Math.sin(angle) * CELESTIAL_RADIUS_Y,
+    THREE.MathUtils.lerp(startZ, endZ, t),
+  );
 }
 
 export function createLighting(scene) {
@@ -106,14 +123,14 @@ export function updateLighting(lighting, { phaseClockBase, phaseClockSeconds }) 
   lighting.fillLight.intensity = 0.14 + daylight * 0.52 + twilight * 0.12;
   lighting.moonLight.intensity = 0.14 + (1 - daylight) * 0.48;
 
-  const sunAngle = (sunT ?? 0) * Math.PI;
-  lighting.sun.position.set(Math.cos(sunAngle - Math.PI / 2) * 72, 12 + Math.sin(sunAngle) * 56, -54);
+  const sunPosition = celestialArcPosition(sunT ?? 0, CELESTIAL_SUN_START_Z, CELESTIAL_SUN_END_Z);
+  lighting.sun.position.copy(sunPosition);
   lighting.sun.visible = sunT !== null;
   lighting.sunLight.position.copy(lighting.sun.position);
   lighting.fillLight.position.set(-lighting.sun.position.x * 0.45, 24 + daylight * 10, 28);
 
-  const moonAngle = (moonT ?? 0) * Math.PI;
-  lighting.moon.position.set(Math.cos(moonAngle - Math.PI / 2) * 76, 10 + Math.sin(moonAngle) * 48, 58);
+  const moonPosition = celestialArcPosition(moonT ?? 0, CELESTIAL_MOON_START_Z, CELESTIAL_MOON_END_Z);
+  lighting.moon.position.copy(moonPosition);
   lighting.moon.visible = moonT !== null;
   lighting.moonLight.position.copy(lighting.moon.position);
 }

@@ -1501,7 +1501,7 @@ function updateProjections(force = false) {
         ids: stack.map((container) => container.id),
       };
     },
-    { flipX: true, flipY: true },
+    { flipX: false, flipY: false },
   );
 
   drawProjection("bottom", refs.projections.bottom, YARD_CONFIG.width, YARD_CONFIG.length, (x, z) => {
@@ -1520,7 +1520,7 @@ function updateProjections(force = false) {
     (x, y) => {
       const ids = [];
       let color = null;
-      for (let z = 0; z < YARD_CONFIG.length; z += 1) {
+      for (let z = YARD_CONFIG.length - 1; z >= 0; z -= 1) {
         const stack = stacks[x][z];
         if (stack[y]) {
           ids.push(stack[y].id);
@@ -1537,7 +1537,7 @@ function updateProjections(force = false) {
   drawProjection("back", refs.projections.back, YARD_CONFIG.width, YARD_CONFIG.height, (x, y) => {
     const ids = [];
     let color = null;
-    for (let z = YARD_CONFIG.length - 1; z >= 0; z -= 1) {
+    for (let z = 0; z < YARD_CONFIG.length; z += 1) {
       const stack = stacks[x][z];
       if (stack[y]) {
         ids.push(stack[y].id);
